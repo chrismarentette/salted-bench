@@ -24,8 +24,8 @@ def main() -> None:
         d["_file"] = p.name
         runs.append(d)
 
-    # Identify valid frontier full-v3 benchmarks to flag newly Pareto-dominated heavy/frontier candidates
-    frontier_best: list[tuple[str, float, float]] = []
+    # Identify valid frontier full-v3 benchmarks per host to flag newly Pareto-dominated candidates on the same rig
+    frontier_best: dict[str, list[tuple[str, float, float]]] = {}
     for model_name, cfg in profiles.items():
         if cfg.get("tier") != "frontier":
             continue
@@ -36,9 +36,12 @@ def main() -> None:
             and r.get("subset", "all") == "all"
             and (r.get("run_validity") or {}).get("status", "valid") == "valid"
         ]
-        if m_v3:
-            best = max(m_v3, key=lambda r: (r["summary"]["pass_pct"], -r["summary"]["wall_median_s"]))
-            frontier_best.append((model_name, best["summary"]["pass_pct"], best["summary"]["wall_median_s"]))
+        by_host: dict[str, list[dict]] = {}
+        for r in m_v3:
+            by_host.setdefault(r.get("host_label") or "", []).append(r)
+        for h, h_runs in by_host.items():
+            best = max(h_runs, key=lambda r: (r["summary"]["pass_pct"], -r["summary"]["wall_median_s"]))
+            frontier_best.setdefault(h, []).append((model_name, best["summary"]["pass_pct"], best["summary"]["wall_median_s"]))
 
     print("=== PRIORITIZED IDLE-WINDOW SHAKEDOWN PLAN (ZERO SWEEPS ON small/dominated) ===")
     for model_name, cfg in profiles.items():
@@ -60,10 +63,11 @@ def main() -> None:
         ]
         dom_note = ""
         if valid_v3:
-            best_m = max(valid_m := valid_v3, key=lambda r: (r["summary"]["pass_pct"], -r["summary"]["wall_median_s"]))
-            dominators = [fn for fn, fp, fw in frontier_best if fn != model_name and fp > best_m["summary"]["pass_pct"] and fw < best_m["summary"]["wall_median_s"]]
-            if len(dominators) >= 2:
-                dom_note = f" [CANDIDATE_DOMINATED by {', '.join(dominators[:3])}]"
+            best_m = max(valid_v3, key=lambda r: (r["summary"]["pass_pct"], -r["summary"]["wall_median_s"]))
+            h_front = frontier_best.get(best_m.get("host_label") or "", [])
+            dominators = [fn for fn, fp, fw in h_front if fn != model_name and fp > best_m["summary"]["pass_pct"] and fw < best_m["summary"]["wall_median_s"]]
+            if dominators and best_m["summary"]["wall_median_s"] > 60.0 and len(dominators) >= 1:
+                dom_note = f" [CANDIDATE_DOMINATED on {best_m.get('host_label')} by {', '.join(dominators[:3])}]"
 
         actions = []
         # Check for high 8k truncation candidates for 16k output pass (within existing ctx)
