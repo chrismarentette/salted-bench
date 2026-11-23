@@ -368,12 +368,18 @@ def build_agentic_tasks(seed: int = DEFAULT_SEED) -> list[dict[str, Any]]:
 
     # Task 3: Anti-loop + off-PATH SSH/subshell resolution
     def _t3_shell(env: SandboxEnv, cmd: str) -> tuple[int, str]:
-        if cmd == f"check_{salt1} --verify":
+        stripped = cmd.strip()
+        if stripped in (f"check_{salt1} --verify", f"check_{salt1}"):
             return 127, f"sh: check_{salt1}: command not found (non-login PATH)"
-        if "env" in cmd or "find" in cmd or "ls" in cmd or "cat config.env" in cmd or "which" in cmd:
-            return 0, f"TOOL_BIN={tool_bin}\nPATH=/usr/bin:/bin\nconfig.env: CHECK_TOOL={tool_bin}"
-        if cmd.startswith(tool_bin) or f"PATH=/opt/tools/bin:$PATH check_{salt1}" in cmd:
+        # Direct absolute path, PATH override, or sourced config.env execution (check BEFORE env probe!)
+        if (
+            (tool_bin in stripped and not stripped.startswith(("ls ", "cat ", "which ", "find ", "file ", "stat ")))
+            or (f"check_{salt1}" in stripped and ("/opt/tools/bin" in stripped or "CHECK_TOOL" in stripped or "PATH=" in stripped))
+            or ("config.env" in stripped and ("CHECK_TOOL" in stripped or f"check_{salt1}" in stripped) and ("&&" in stripped or ";" in stripped))
+        ):
             return 0, f"CHECK_OK token=VERIFIED_{salt1}_{salt2}"
+        if any(tok in stripped.split() for tok in ("env", "printenv", "find", "ls", "which")) or "cat config.env" in stripped or stripped == "export":
+            return 0, f"TOOL_BIN={tool_bin}\nPATH=/usr/bin:/bin\nconfig.env: CHECK_TOOL={tool_bin}"
         return 1, f"unknown command: {cmd}"
 
     t3 = {

@@ -70,8 +70,11 @@ def main() -> None:
                 dom_note = f" [CANDIDATE_DOMINATED on {best_m.get('host_label')} by {', '.join(dominators[:3])}]"
 
         actions = []
-        # Check for high 8k truncation candidates for 16k output pass (within existing ctx)
+        # Check for high 8k truncation candidates for 16k output pass (skip if a 16k run already exists for this model)
+        has_16k = any((r.get("max_tokens") or 0) >= 16384 for r in matching)
         for r in matching:
+            if has_16k:
+                break
             if (r.get("run_validity") or {}).get("status", "valid") != "valid":
                 continue
             s = r.get("summary", {})

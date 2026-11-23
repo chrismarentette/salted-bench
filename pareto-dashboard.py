@@ -91,6 +91,8 @@ def normalize_run(raw: dict, fam_counters: dict, anonymize: bool = False) -> dic
         for k in ("hardware", "engine", "backend", "notes", "mem_label", "phase", "insight"):
             if isinstance(run.get(k), str):
                 run[k] = anonymize_text(run[k])
+        if isinstance(run.get("extended_from"), str):
+            run["extended_from"] = anonymize_text(run["extended_from"], slug_hosts=True)
         run.pop("url", None)
         if isinstance(run.get("llama_version"), dict):
             lv = run["llama_version"]
@@ -831,15 +833,18 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         const base = shortModelBase(r.model);
         const q = shortQuantTag(r.quant);
         const e = shortEffortTag(r.effort);
+        const cap = (r.max_tokens >= 16384 && !(r.effort || '').includes('16k')) ? '16k' : '';
         const sub = r._sliceTag === 'subset' ? 'sub' : '';
-        return [base, q, e, sub].filter(Boolean).join(' ');
+        return [base, q, e, cap, sub].filter(Boolean).join(' ');
       }
 
       function runDisplayName(r) {
         if (r._combinedLabel) return r._combinedLabel;
         const parts = [r.model, r.quant];
         if (r.draft_model) parts.push('+ Draft');
-        if (r.effort && r.effort !== 'default') parts.push(`(${r.effort})`);
+        const capTag = (r.max_tokens >= 16384 && !(r.effort || '').includes('16k')) ? '16k' : '';
+        const effStr = [r.effort && r.effort !== 'default' ? r.effort : '', capTag].filter(Boolean).join(' ');
+        if (effStr) parts.push(`(${effStr})`);
         if (r._sliceTag) parts.push(`[${r._sliceTag}]`);
         return parts.filter(Boolean).join(' ');
       }
@@ -1026,14 +1031,23 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
       function computeFrontier(points, xKey, yKey, lowerIsBetter) {
         const valid = points.filter(p => typeof p[xKey] === 'number' && !isNaN(p[xKey]) && p[xKey] > 0);
-        const front = valid.filter(a => !valid.some(b => {
+        const frontRaw = valid.filter(a => !valid.some(b => {
           if (a === b) return false;
           const bx = lowerIsBetter ? b[xKey] <= a[xKey] : b[xKey] >= a[xKey];
           const by = b[yKey] >= a[yKey];
           const strict = lowerIsBetter ? (b[xKey] < a[xKey] || b[yKey] > a[yKey]) : (b[xKey] > a[xKey] || b[yKey] > a[yKey]);
           return bx && by && strict;
         }));
-        front.sort((a, b) => a[xKey] !== b[xKey] ? a[xKey] - b[xKey] : (lowerIsBetter ? a[yKey] - b[yKey] : b[yKey] - a[yKey]));
+        frontRaw.sort((a, b) => a[xKey] !== b[xKey] ? a[xKey] - b[xKey] : (lowerIsBetter ? a[yKey] - b[yKey] : b[yKey] - a[yKey]));
+        // Keep a single representative at identical (x, y) coordinates so labels & spline never duplicate
+        const seenXY = new Set();
+        const front = [];
+        for (const p of frontRaw) {
+          const k = `${Number(p[xKey]).toFixed(4)}|${Number(p[yKey]).toFixed(4)}`;
+          if (seenXY.has(k)) continue;
+          seenXY.add(k);
+          front.push(p);
+        }
         return front;
       }
 

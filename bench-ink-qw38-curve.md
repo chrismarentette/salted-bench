@@ -14,16 +14,25 @@
 | `p2-Rig B-qwflash-ud-q4kxl-low-mtp` | Rig B | Qwen3.8-Flash-Next | UD-Q4_K_XL | low | 14/16 (87.5%) | 25/28 (89.3%) | 1 | 20.87 | 36.6 | 44.31 | 1.211 | 769.4 | 507.5 | 51.0 | 0.186 | — |
 | `v3-Rig A-gemma4-12b-qat-mtp` | Rig A | Gemma-4-12B-QAT | Q4_0 (QAT) | think | 10/16 (62.5%) | 17/28 (60.7%) | 8 | 59.84 | 100.8 | 87.89 | 0.872 | 564.1 | 666.5 | 39.0 | 0.045 | 129.12W / 33.877Wh |
 | `v3-Rig A-ink2-iq3xxs-low` | Rig A | Inkling-2-Mini-IQ3 | AD-IQ3_XXS | low | 16/16 (100.0%) | 26/28 (92.9%) | 1 | 37.34 | 66.62 | 69.21 | 1.039 | 2585.5 | 161.1 | 27.2 | 0.141 | — |
+| `v3-Rig B-ink2-udq4kxl-high-dspark` | Rig B | Inkling-2-Mini | UD-Q4_K_XL | high | 14/16 (87.5%) | 22/28 (78.6%) | 5 | 47.22 | 146.34 | 177.21 | 1.211 | 841.5 | 443.4 | 30.7 | 0.041 | 118.33W / 134.699Wh |
+| `v3-Rig B-ink2-udq4kxl-low-dspark-16k` | Rig B | Inkling-2-Mini | UD-Q4_K_XL | low | 16/16 (100.0%) | 27/28 (96.4%) | 1 | 34.02 | 76.18 | 108.01 | 1.418 | 874.7 | 430.7 | 33.2 | 0.131 | 124.2W / 17.598Wh |
 | `v3-Rig B-ink2-udq4kxl-low-dspark-frontier` | Rig B | Inkling-2-Mini | UD-Q4_K_XL | low | — | 3/4 (75.0%) | 1 | 199.58 | 199.04 | 56.73 | 0.285 | 1596.6 | 465.7 | 29.7 | 0.116 | — |
 | `v3-Rig B-ink2-udq4kxl-low-dspark` | Rig B | Inkling-2-Mini | UD-Q4_K_XL | low | 16/16 (100.0%) | 27/28 (96.4%) | 1 | 34.02 | 67.66 | 77.64 | 1.148 | 874.8 | 430.7 | 33.0 | 0.142 | — |
 | `v3-Rig B-ink2-udq4kxl-med-dspark` | Rig B | Inkling-2-Mini | UD-Q4_K_XL | medium | 15/16 (93.8%) | 23/28 (82.1%) | 4 | 36.73 | 92.33 | 112.41 | 1.217 | 883.6 | 426.9 | 33.5 | 0.058 | 133.47W / 95.851Wh |
+| `v3-Rig B-qw38-27b-udq5kxl-high-mtp` | Rig B | Qwen3.8-27B | UD-Q5_K_XL | high | 13/16 (81.2%) | 23/28 (82.1%) | 5 | 75.08 | 187.85 | 240.23 | 1.279 | 1297.9 | 313.8 | 24.8 | 0.024 | 133.96W / 195.729Wh |
+| `v3-Rig B-qw38-27b-udq5kxl-low-mtp-16k` | Rig B | Qwen3.8-27B | UD-Q5_K_XL | low | 15/16 (93.8%) | 26/28 (92.9%) | 0 | 46.12 | 78.1 | 102.72 | 1.315 | 1289.5 | 305.9 | 30.5 | 0.174 | 133.97W / 29.358Wh |
 | `v3-Rig B-qw38-27b-udq5kxl-low-mtp-frontier` | Rig B | Qwen3.8-27B | UD-Q5_K_XL | low | — | 2/4 (50.0%) | 2 | 234.39 | 236.26 | 50.32 | 0.213 | 1936.5 | 368.4 | 29.2 | 0.063 | — |
 | `v3-Rig B-qw38-27b-udq5kxl-low-mtp` | Rig B | Qwen3.8-27B | UD-Q5_K_XL | low | 15/16 (93.8%) | 25/28 (89.3%) | 2 | 46.12 | 69.8 | 76.74 | 1.099 | 1289.5 | 305.9 | 30.5 | 0.156 | — |
 | `v3-Rig B-qw38-27b-udq5kxl-med-mtp` | Rig B | Qwen3.8-27B | UD-Q5_K_XL | medium | 15/16 (93.8%) | 26/28 (92.9%) | 1 | 53.01 | 76.59 | 77.68 | 1.014 | 1122.4 | 344.9 | 30.9 | 0.157 | 133.94W / 79.79Wh |
+| `v3-Rig B-qw38-27b-udq5kxl-med-t06-mtp` | Rig B | Qwen3.8-27B | UD-Q5_K_XL | med-t06 | 15/16 (93.8%) | 26/28 (92.9%) | 1 | 47.34 | 72.91 | 77.17 | 1.058 | 1117.4 | 347.1 | 31.8 | 0.149 | 133.98W / 75.988Wh |
+| `v3-Rig B-qwen36-35b-q5km-frontier-p0-16k` | Rig B | Qwen3.6-35B-A3B | Q5_K_M | think-p0-16k | — | 2/4 (50.0%) | 2 | 246.6 | 241.78 | 50.36 | 0.208 | 380.9 | 1785.2 | 57.6 | 0.025 | 118.07W / 31.719Wh |
 | `v3-Rig B-qwen36-35b-q5km-frontier` | Rig B | Qwen3.6-35B-A3B | Q5_K_M | default | — | 0/4 (0.0%) | 4 | 148.37 | 156.72 | 17.37 | 0.111 | 388.3 | 1750.9 | 55.3 | 0.0 | — |
 | `v3-Rig B-qwen36-35b-q5km-nothink` | Rig B | Qwen3.6-35B-A3B | Q5_K_M | nothink | 9/16 (56.2%) | 19/28 (67.9%) | 1 | 3.72 | 17.03 | 32.69 | 1.919 | 271.8 | 1366.6 | 55.7 | 1.0 | — |
 | `v3-Rig B-qwflash-ud-iq3xxs-med-mtp` | Rig B | Qwen3.8-Flash-Next | UD-IQ3_XXS | medium | 15/16 (93.8%) | 26/28 (92.9%) | 1 | 18.56 | 38.09 | 41.4 | 1.087 | 754.7 | 505.4 | 54.9 | 0.151 | 133.92W / 39.68Wh |
+| `v3-Rig B-qwflash-ud-q4kxl-high-mtp` | Rig B | Qwen3.8-Flash-Next | UD-Q4_K_XL | high | 12/16 (75.0%) | 20/28 (71.4%) | 7 | 22.35 | 118.89 | 155.91 | 1.311 | 762.8 | 538.3 | 43.9 | 0.02 | 123.48W / 114.197Wh |
+| `v3-Rig B-qwflash-ud-q4kxl-low-mtp-16k` | Rig B | Qwen3.8-Flash-Next | UD-Q4_K_XL | low | 14/16 (87.5%) | 25/28 (89.3%) | 1 | 20.87 | 41.89 | 63.93 | 1.526 | 769.4 | 518.9 | 51.0 | 0.167 | 122.77W / 10.459Wh |
 | `v3-Rig B-qwflash-ud-q4kxl-med-mtp` | Rig B | Qwen3.8-Flash-Next | UD-Q4_K_XL | medium | 16/16 (100.0%) | 26/28 (92.9%) | 2 | 20.66 | 41.08 | 49.84 | 1.213 | 577.4 | 631.3 | 51.9 | 0.136 | 125.47W / 40.097Wh |
+| `v3-Rig B-qwflash-ud-q4kxl-med-t06-mtp` | Rig B | Qwen3.8-Flash-Next | UD-Q4_K_XL | med-t06 | 15/16 (93.8%) | 26/28 (92.9%) | 1 | 22.01 | 33.31 | 36.88 | 1.107 | 570.2 | 642.0 | 53.9 | 0.182 | 125.07W / 32.405Wh |
 
 ## 2. Extended-v4 (`6`-Task: Epistemic Honesty, Surgical Diff, 2-Turn Recovery)
 | Run ID | Model | Effort | Score | Med (s) | Stdev (s) | TTFT med (ms) | TG (t/s) | Tok Eff | Sys W / Wh |
