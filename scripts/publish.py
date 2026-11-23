@@ -117,7 +117,7 @@ def main() -> int:
         rel = str(p.relative_to(ROOT))
         if rel.startswith(".git/") or rel.startswith("runs/") or rel.startswith("runs_v4/") or rel.startswith("__pycache__/"):
             continue
-        if p.suffix in (".pyc", ".log") or p.name == ".redact.local":
+        if p.suffix in (".pyc", ".log", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".ico") or p.name == ".redact.local":
             continue
         failures.extend(scan_file(p, rel, extra))
 
