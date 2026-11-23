@@ -113,6 +113,37 @@ def normalize_run(raw: dict, fam_counters: dict, anonymize: bool = False) -> dic
             if isinstance(t.get("detail"), str):
                 t["detail"] = anonymize_text(t["detail"])
         run["run_id"] = anonymize_text(run.get("run_id", f"run-{sum(fam_counters.values())}"), slug_hosts=True)
+    if not run.get("suite"):
+        tot = (run.get("summary") or {}).get("total_tasks") or len(run.get("tasks") or [])
+        if tot == 24:
+            run["suite"] = "v2"
+        elif tot >= 28:
+            run["suite"] = "v3"
+        else:
+            run["suite"] = "v1"
+    if not run.get("subset"):
+        run["subset"] = "all"
+    rid_l = (run.get("run_id") or "").lower()
+    if not run.get("draft_model") and ("-mtp" in rid_l or "-dspark" in rid_l):
+        run["draft_model"] = "dspark" if "-dspark" in rid_l else "mtp"
+    if not run.get("categories") and run.get("tasks"):
+        cats: dict[str, dict] = {}
+        by_cat: dict[str, list[dict]] = {}
+        for t in run["tasks"]:
+            ck = t.get("category") or "general"
+            by_cat.setdefault(ck, []).append(t)
+        for ck, items in by_cat.items():
+            walls = sorted(float(t.get("wall_s") or 0.0) for t in items)
+            mid = len(walls) // 2
+            med_w = walls[mid] if len(walls) % 2 else (walls[mid - 1] + walls[mid]) / 2.0
+            pc = sum(1 for t in items if t.get("passed"))
+            cats[ck] = {
+                "pass_count": pc,
+                "total": len(items),
+                "pass_pct": round(100.0 * pc / max(1, len(items)), 1),
+                "wall_median_s": round(med_w, 2),
+            }
+        run["categories"] = cats
     fam_key, fam_label = detect_model_family(run.get("model", ""))
     idx = fam_counters.get(fam_key, 0)
     fam_counters[fam_key] = idx + 1
@@ -131,6 +162,14 @@ def normalize_run(raw: dict, fam_counters: dict, anonymize: bool = False) -> dic
     return run
 
 
+def is_supported_run(item: object) -> bool:
+    if not isinstance(item, dict):
+        return False
+    if item.get("schema") == "salted-eval/v1":
+        return True
+    return item.get("schema_version") == 1 and item.get("suite") in ("extended_v4", "agentic")
+
+
 def load_runs(inputs: list[Path], anonymize: bool = False) -> list[dict]:
     files: list[Path] = []
     for p in inputs:
@@ -147,9 +186,9 @@ def load_runs(inputs: list[Path], anonymize: bool = False) -> list[dict]:
         data = json.loads(fp.read_text())
         if isinstance(data, list):
             for item in data:
-                if item.get("schema") == "salted-eval/v1":
+                if is_supported_run(item):
                     runs.append(normalize_run(item, fam_counters, anonymize))
-        elif isinstance(data, dict) and data.get("schema") == "salted-eval/v1":
+        elif is_supported_run(data):
             runs.append(normalize_run(data, fam_counters, anonymize))
     return runs
 
@@ -223,6 +262,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       cursor: pointer; border: 1px solid var(--border-strong); background: var(--bg-card);
       color: var(--text-primary); transition: all 0.16s ease; font-family: var(--font-sans);
     }
+    .btn:focus-visible, .pill:focus-visible, .tab-btn:focus-visible, .drawer-toggle:focus-visible, .run-chip:focus-visible, .zoom-reset-btn:focus-visible {
+      outline: 2px solid var(--cyan); outline-offset: 2px;
+    }
     .btn:hover { background: var(--bg-elevated); border-color: var(--cyan); color: #fff; }
     .btn-primary { background: rgba(56, 189, 248, 0.14); border-color: rgba(56, 189, 248, 0.45); color: var(--cyan); }
     .btn-emerald { background: rgba(52, 211, 153, 0.14); border-color: rgba(52, 211, 153, 0.45); color: var(--emerald); }
@@ -241,9 +283,14 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: var(--radius-md);
       margin-bottom: 16px; overflow: hidden;
     }
+    .filter-suite-bar {
+      padding: 10px 14px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+      gap: 10px; border-bottom: 1px solid var(--border-subtle); background: rgba(15, 23, 42, 0.72);
+    }
+    .suite-explain { font-size: 11.5px; color: var(--text-secondary); }
     .filter-top-bar {
       padding: 10px 14px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
-      gap: 10px; background: rgba(15, 23, 42, 0.5);
+      gap: 10px; background: rgba(15, 23, 42, 0.42);
     }
     .filter-row { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
     .pills-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); margin-right: 4px; }
@@ -453,8 +500,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         <div class="eyebrow"><span class="eyebrow-dot"></span>Salted Anti-Contamination Benchmark System</div>
         <h1>__TITLE__</h1>
         <div class="subtitle">
-          <span class="meta-chip mono">salted-eval/v1</span>
-          <span class="meta-chip">16 / 24 / 28-Task Suites</span>
+          <span class="meta-chip mono">Salted Anti-Contamination Suites</span>
           <span class="meta-chip mono">cache_prompt: false</span>
           <span class="meta-chip">__SUBTITLE__</span>
         </div>
@@ -467,7 +513,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
     <section class="kpi-grid" id="kpi-strip"></section>
 
-    <section class="filter-panel" aria-label="System, Model Family & Run Filters">
+    <section class="filter-panel" aria-label="Benchmark Suite, Rig, Model Family & Run Filters">
+      <div class="filter-suite-bar">
+        <div class="filter-row" id="suite-filters"></div>
+        <div class="suite-explain" id="suite-explain"></div>
+      </div>
       <div class="filter-top-bar">
         <div class="filter-row" id="system-filters"></div>
         <div class="filter-row" id="model-quick-filters"></div>
@@ -483,15 +533,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       <section class="card">
         <div class="card-header">
           <div class="tabs" role="tablist">
-            <button class="tab-btn active" id="tab-overall" type="button">Overall Pareto</button>
-            <button class="tab-btn" id="tab-category" type="button">Category &amp; Ablations</button>
+            <button class="tab-btn active" id="tab-overall" type="button">Pareto Chart</button>
+            <button class="tab-btn" id="tab-category" type="button">By Category</button>
             <button class="tab-btn" id="tab-matrix" type="button">Task Matrix</button>
           </div>
           <div class="mono" style="font-size: 11.5px; color: var(--text-muted);" id="chart-context-tag"></div>
         </div>
 
         <div class="pills-bar" id="controls-overall">
-          <div class="pills-group">
+          <div class="pills-group" id="axis-pills-group">
             <span class="pills-label">X-Axis:</span>
             <button class="pill active" data-axis="wall_median_s" type="button">Median Wall (s)</button>
             <button class="pill" data-axis="wall_mean_s" type="button">Mean Wall (s)</button>
@@ -500,31 +550,21 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             <button class="pill" data-axis="pp_tps_median" type="button">Prefill (pp t/s)</button>
             <button class="pill" data-axis="tg_tps_median" type="button">Decode (tg t/s)</button>
           </div>
-          <div class="pills-group">
+          <div class="pills-group" id="lbl-pills-group">
             <span class="pills-label">Labels:</span>
             <button class="pill active" data-lbl="hover" type="button" title="Clean dots; hover or click any point to reveal/pin its label">Hover / Click</button>
             <button class="pill" data-lbl="frontier" type="button" title="Label Pareto frontier points only">Frontier</button>
             <button class="pill" data-lbl="all" type="button">All</button>
-            <button class="pill active" id="toggle-subsets-overall" type="button" title="Plot subset ablations as ♦ markers (excluded from full-suite frontier)">Subsets (♦)</button>
           </div>
         </div>
 
         <div class="pills-bar" id="controls-category" style="display: none;">
-          <div class="pills-group">
-            <span class="pills-label">Category:</span>
-            <button class="pill active" data-cat="all" type="button">All Categories</button>
-            <button class="pill" data-cat="coding" type="button">Twisted Coding</button>
-            <button class="pill" data-cat="reasoning" type="button">Symbolic Reasoning</button>
-            <button class="pill" data-cat="structured" type="button">Strict Schema</button>
-            <button class="pill" data-cat="long_context" type="button">Long Context</button>
-            <button class="pill" data-cat="agent_tools" type="button">Agent Tools (v2)</button>
-            <button class="pill" data-cat="ops_and_voice" type="button">Ops &amp; Voice (v2)</button>
-            <button class="pill" data-cat="frontier_ceiling" type="button">Frontier Ceiling (v3)</button>
-          </div>
-          <div class="pills-group">
+          <div class="pills-group" id="cat-pills-group"></div>
+          <div class="pills-group" id="cat-lbl-pills-group">
             <span class="pills-label">Labels:</span>
-            <button class="pill active" data-lbl-cat="hover" type="button">Hover / Click</button>
-            <button class="pill" data-lbl-cat="frontier" type="button">Frontier</button>
+            <button class="pill active" data-lbl="hover" type="button">Hover / Click</button>
+            <button class="pill" data-lbl="frontier" type="button">Frontier</button>
+            <button class="pill" data-lbl="all" type="button">All</button>
           </div>
         </div>
 
@@ -649,13 +689,18 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       }
 
       const CAT_META = {
-        coding:           { label: 'Twisted Coding',     short: 'Coding' },
-        reasoning:        { label: 'Symbolic Reasoning', short: 'Symbolic' },
-        structured:       { label: 'Strict Schema',      short: 'Schema' },
-        long_context:     { label: 'Long Context',       short: 'Long Ctx' },
-        agent_tools:      { label: 'Agent Tools',        short: 'Tools' },
-        ops_and_voice:    { label: 'Ops & Voice',        short: 'Ops/Voice' },
-        frontier_ceiling: { label: 'Frontier Ceiling',   short: 'Frontier' },
+        coding:            { label: 'Twisted Coding',     short: 'Coding' },
+        reasoning:         { label: 'Symbolic Reasoning', short: 'Symbolic' },
+        structured:        { label: 'Strict Schema',      short: 'Schema' },
+        long_context:      { label: 'Long Context',       short: 'Long Ctx' },
+        agent_tools:       { label: 'Agent Tools',        short: 'Tools' },
+        ops_and_voice:     { label: 'Ops & Voice',        short: 'Ops/Voice' },
+        frontier_ceiling:  { label: 'Frontier Ceiling',   short: 'Frontier' },
+        epistemic_honesty: { label: 'Epistemic Honesty',  short: 'Honesty' },
+        surgical_diff:     { label: 'Surgical Diff',      short: 'Diff' },
+        tool_recovery:     { label: 'Tool Recovery',      short: 'Recovery' },
+        two_turn_recovery: { label: '2-Turn Recovery',    short: 'Recovery' },
+        agent_harness:     { label: 'Agent Harness',      short: 'Agentic' },
       };
 
       const V1_TASK_IDS = new Set([
@@ -665,19 +710,38 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         'ctx_4k_multihop','ctx_4k_diff_audit','ctx_16k_state_mutation','ctx_16k_needle_contradiction',
       ]);
 
+      const FRONTIER_TASK_IDS = new Set([
+        'front_bilevel_dp','front_nonlocal_bijection_10','front_16k_rollback_audit','front_ood_affine_tx_taint',
+      ]);
+
+      const SUITE_GROUPS = [
+        { id: 'v3',          label: 'v3 (28 Tasks)',      desc: 'Full 28-task parity suite — identical prompt set across every model & rig' },
+        { id: 'v1',          label: 'v1 Core (16 Tasks)', desc: 'Core 16 tasks — native 16-task runs + matching 16-task slice from v3 runs' },
+        { id: 'frontier',    label: 'Frontier (4 Tasks)', desc: '4 hardest frontier_ceiling tasks — standalone subsets + matching 4-task slice from v3' },
+        { id: 'extended_v4', label: 'Extended v4 (6t)',   desc: 'Epistemic honesty, minimal unified diff & 2-turn self-correction recovery' },
+        { id: 'agentic',     label: 'Agentic (11t)',      desc: 'Multi-turn sandboxed repo tasks (read-before-write, anti-loop, P vs NP)' },
+        { id: 'combined',    label: 'All Suites (Avg)',   desc: 'Cross-suite macro-average per model config across independent suites completed' },
+      ];
+
+      function detectInitialGroup(runs) {
+        if (runs.some(r => r.suite === 'v3' && (r.subset || 'all') === 'all')) return 'v3';
+        if (runs.some(r => r.suite === 'extended_v4')) return 'extended_v4';
+        if (runs.some(r => r.suite === 'agentic')) return 'agentic';
+        if (runs.some(r => (r.subset || 'all') === 'all')) return 'v1';
+        return 'combined';
+      }
+
       const state = {
         runs: INITIAL_RUNS,
         disabledIds: new Set(),
         pinnedIds: new Set(),
         drawerOpen: false,
         systemFilter: 'all',
-        suiteFilter: 'native',
+        suiteGroup: detectInitialGroup(INITIAL_RUNS),
         mode: 'overall',
         axis: 'wall_median_s',
         labelMode: 'hover',
-        catLabelMode: 'hover',
         catFilter: 'all',
-        showSubsetsOnOverall: true,
         showTainted: false,
         addedIds: [],
         zoom: { x0: 0, x1: 1, y0: 0, y1: 1 },
@@ -704,11 +768,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       }
 
       function runDisplayName(r) {
+        if (r._combinedLabel) return r._combinedLabel;
         const parts = [r.model, r.quant];
         if (r.draft_model) parts.push('+ Draft');
         if (r.effort && r.effort !== 'default') parts.push(`(${r.effort})`);
-        if (r.suite && r.suite !== 'v1' && state.suiteFilter !== 'v1_compat') parts.push(`[${r.suite}]`);
-        if (r.subset && r.subset !== 'all') parts.push(`[${r.subset}]`);
+        if (r._sliceTag) parts.push(`[${r._sliceTag}]`);
         return parts.filter(Boolean).join(' ');
       }
 
@@ -719,47 +783,53 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
       }
 
-      function projectRun(r) {
-        if (state.suiteFilter !== 'v1_compat' || !r.tasks || !r.tasks.length) return r;
-        const v1t = r.tasks.filter(t => V1_TASK_IDS.has(t.id));
-        if (!v1t.length || v1t.length === r.tasks.length) return r;
-        const walls = v1t.map(t => t.wall_s);
+      function projectTaskSubset(r, idSet, targetSuite, sliceTag) {
+        if (!r.tasks || !r.tasks.length) return r;
+        const sub = r.tasks.filter(t => idSet.has(t.id));
+        if (!sub.length) return null;
+        if (sub.length === r.tasks.length && r.suite === targetSuite) return r;
+        const walls = sub.map(t => t.wall_s || 0);
         const sortedW = [...walls].sort((a, b) => a - b);
-        const p90 = sortedW[Math.max(0, Math.min(v1t.length - 1, Math.round(0.9 * (v1t.length - 1))))];
-        const passed = v1t.filter(t => t.passed).length;
-        const dAcc = v1t.reduce((a, t) => a + (t.draft_n_accepted || 0), 0);
-        const dTot = v1t.reduce((a, t) => a + (t.draft_n || 0), 0);
+        const p90 = sortedW[Math.max(0, Math.min(sub.length - 1, Math.round(0.9 * (sub.length - 1))))];
+        const passed = sub.filter(t => t.passed).length;
+        const dAcc = sub.reduce((a, t) => a + (t.draft_n_accepted || 0), 0);
+        const dTot = sub.reduce((a, t) => a + (t.draft_n || 0), 0);
         const cats = {};
-        for (const ck of ['coding', 'reasoning', 'structured', 'long_context']) {
-          const cr = v1t.filter(t => t.category === ck);
+        const catNames = Array.from(new Set(sub.map(t => t.category).filter(Boolean)));
+        catNames.forEach(ck => {
+          const cr = sub.filter(t => t.category === ck);
           if (cr.length) {
             cats[ck] = {
               pass_count: cr.filter(t => t.passed).length,
               total: cr.length,
               pass_pct: Number((100 * cr.filter(t => t.passed).length / cr.length).toFixed(1)),
-              wall_median_s: Number(medianNum(cr.map(t => t.wall_s)).toFixed(2)),
+              wall_median_s: Number(medianNum(cr.map(t => t.wall_s || 0)).toFixed(2)),
             };
           }
-        }
+        });
+        const pps = sub.map(t => t.pp_tps).filter(v => typeof v === 'number' && v > 0);
+        const tgs = sub.map(t => t.tg_tps).filter(v => typeof v === 'number' && v > 0);
         return {
           ...r,
-          suite: 'v1-compat',
-          tasks: v1t,
+          suite: targetSuite,
+          subset: 'all',
+          _sliceTag: sliceTag,
+          tasks: sub,
           categories: cats,
           summary: {
             pass_count: passed,
-            total_tasks: v1t.length,
-            pass_pct: Number((100 * passed / v1t.length).toFixed(1)),
-            truncated: v1t.filter(t => t.finish_reason === 'length').length,
+            total_tasks: sub.length,
+            pass_pct: Number((100 * passed / sub.length).toFixed(1)),
+            truncated: sub.filter(t => t.finish_reason === 'length').length,
             wall_total_s: Number(walls.reduce((a, b) => a + b, 0).toFixed(2)),
             wall_total_min: Number((walls.reduce((a, b) => a + b, 0) / 60).toFixed(2)),
             wall_median_s: Number(medianNum(walls).toFixed(2)),
-            wall_mean_s: Number((walls.reduce((a, b) => a + b, 0) / Math.max(1, v1t.length)).toFixed(2)),
+            wall_mean_s: Number((walls.reduce((a, b) => a + b, 0) / Math.max(1, sub.length)).toFixed(2)),
             wall_p90_s: Number(p90.toFixed(2)),
-            gen_tok_total: v1t.reduce((a, t) => a + (t.predicted_n || 0), 0),
-            gen_tok_median: Math.round(medianNum(v1t.map(t => t.predicted_n || 0))),
-            pp_tps_median: Number(medianNum(v1t.map(t => t.pp_tps || 0)).toFixed(1)),
-            tg_tps_median: Number(medianNum(v1t.map(t => t.tg_tps || 0)).toFixed(1)),
+            gen_tok_total: sub.reduce((a, t) => a + (t.predicted_n || 0), 0),
+            gen_tok_median: Math.round(medianNum(sub.map(t => t.predicted_n || 0))),
+            pp_tps_median: pps.length ? Number(medianNum(pps).toFixed(1)) : null,
+            tg_tps_median: tgs.length ? Number(medianNum(tgs).toFixed(1)) : null,
             draft_accepted: dAcc,
             draft_total: dTot,
             draft_accept_pct: dTot ? Number((100 * dAcc / dTot).toFixed(1)) : null,
@@ -771,14 +841,119 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         return Boolean(r.run_validity && r.run_validity.status === 'invalidated');
       }
 
-      function visibleRuns(includeSubsets = false) {
-        return state.runs.filter(r => {
-          if (state.disabledIds.has(r.run_id)) return false;
+      function runsInGroup(groupId, respectDisabled = true, respectSystem = true) {
+        const raw = state.runs.filter(r => {
           if (!state.showTainted && isTaintedRun(r)) return false;
-          if (state.systemFilter !== 'all' && r.host_label !== state.systemFilter) return false;
-          if (!includeSubsets && r.subset && r.subset !== 'all') return false;
+          if (respectSystem && state.systemFilter !== 'all' && r.host_label !== state.systemFilter) return false;
+          if (respectDisabled && state.disabledIds.has(r.run_id)) return false;
           return true;
-        }).map(projectRun);
+        });
+        if (groupId === 'v3') {
+          return raw.filter(r => r.suite === 'v3' && (r.subset || 'all') === 'all');
+        }
+        if (groupId === 'v1') {
+          return raw
+            .filter(r => (r.suite === 'v1' || r.suite === 'v2' || r.suite === 'v3') && (r.subset || 'all') === 'all')
+            .map(r => (r.suite === 'v1' ? r : projectTaskSubset(r, V1_TASK_IDS, 'v1', `from ${r.suite}`)))
+            .filter(Boolean);
+        }
+        if (groupId === 'frontier') {
+          return raw
+            .filter(r => r.subset === 'frontier' || (r.suite === 'v3' && (r.subset || 'all') === 'all'))
+            .map(r => (r.subset === 'frontier' ? { ...r, _sliceTag: 'subset' } : projectTaskSubset(r, FRONTIER_TASK_IDS, 'frontier', 'from v3')))
+            .filter(Boolean);
+        }
+        if (groupId === 'extended_v4') {
+          return raw.filter(r => r.suite === 'extended_v4');
+        }
+        if (groupId === 'agentic') {
+          return raw.filter(r => r.suite === 'agentic');
+        }
+        if (groupId === 'combined') {
+          return raw.filter(r => (r.subset || 'all') === 'all');
+        }
+        return raw;
+      }
+
+      function buildCombinedRuns(rawRuns) {
+        const buckets = new Map();
+        rawRuns.forEach(r => {
+          if ((r.subset || 'all') !== 'all') return;
+          const suite = r.suite || 'v1';
+          if (!['v3', 'v2', 'v1', 'extended_v4', 'agentic'].includes(suite)) return;
+          const hasDraft = Boolean(r.draft_model);
+          const key = [r.model || '', r.quant || '', r.effort || 'default', hasDraft ? 'draft' : 'nodraft', r.host_label || ''].join('|');
+          if (!buckets.has(key)) buckets.set(key, { proto: r, bySuite: {} });
+          const entry = buckets.get(key);
+          const prev = entry.bySuite[suite];
+          if (!prev || (r.summary && prev.summary && r.summary.pass_pct > prev.summary.pass_pct)) {
+            entry.bySuite[suite] = r;
+          }
+        });
+        const combined = [];
+        buckets.forEach((entry, key) => {
+          const r0 = entry.proto;
+          const sMap = entry.bySuite;
+          // Prefer full v3 over v1/v2 so the shared 16 core tasks are never double-counted
+          const pickedSuites = [];
+          if (sMap.v3) pickedSuites.push(['v3', sMap.v3]);
+          else if (sMap.v2) pickedSuites.push(['v2', sMap.v2]);
+          else if (sMap.v1) pickedSuites.push(['v1', sMap.v1]);
+          if (sMap.extended_v4) pickedSuites.push(['extended_v4', sMap.extended_v4]);
+          if (sMap.agentic) pickedSuites.push(['agentic', sMap.agentic]);
+          if (!pickedSuites.length) return;
+          const avg = arr => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+          const passPcts = pickedSuites.map(([, x]) => x.summary.pass_pct || 0);
+          const wallsMed = pickedSuites.map(([, x]) => x.summary.wall_median_s || 0).filter(v => v > 0);
+          const wallsMean = pickedSuites.map(([, x]) => meanWall(x.summary)).filter(v => v > 0);
+          const pps = pickedSuites.map(([, x]) => x.summary.pp_tps_median).filter(v => typeof v === 'number' && v > 0);
+          const tgs = pickedSuites.map(([, x]) => x.summary.tg_tps_median).filter(v => typeof v === 'number' && v > 0);
+          const toks = pickedSuites.map(([, x]) => x.summary.gen_tok_median || 0).filter(v => v > 0);
+          const totalPass = pickedSuites.reduce((a, [, x]) => a + (x.summary.pass_count || 0), 0);
+          const totalTasks = pickedSuites.reduce((a, [, x]) => a + (x.summary.total_tasks || 0), 0);
+          const totalTrunc = pickedSuites.reduce((a, [, x]) => a + (x.summary.truncated || 0), 0);
+          const totalWallS = pickedSuites.reduce((a, [, x]) => a + (x.summary.wall_total_s || 0), 0);
+          const totalTok = pickedSuites.reduce((a, [, x]) => a + (x.summary.gen_tok_total || 0), 0);
+          const lblParts = [r0.model, r0.quant, r0.draft_model ? '+ Draft' : null, (r0.effort && r0.effort !== 'default') ? `(${r0.effort})` : null].filter(Boolean);
+          const cats = {};
+          pickedSuites.forEach(([, sr]) => {
+            Object.entries(sr.categories || {}).forEach(([ck, cv]) => { cats[ck] = cv; });
+          });
+          combined.push({
+            ...r0,
+            run_id: `combined::${key}`,
+            _combinedLabel: lblParts.join(' '),
+            _suitesCount: pickedSuites.length,
+            _suiteScores: sMap,
+            _constituentIds: pickedSuites.map(([, x]) => x.run_id),
+            categories: cats,
+            summary: {
+              pass_count: totalPass,
+              total_tasks: totalTasks,
+              pass_pct: Number(avg(passPcts).toFixed(1)),
+              truncated: totalTrunc,
+              wall_total_s: Number(totalWallS.toFixed(2)),
+              wall_total_min: Number((totalWallS / 60).toFixed(2)),
+              wall_median_s: Number(avg(wallsMed).toFixed(2)),
+              wall_mean_s: Number(avg(wallsMean).toFixed(2)),
+              wall_p90_s: null,
+              gen_tok_total: totalTok,
+              gen_tok_median: Math.round(avg(toks)),
+              pp_tps_median: pps.length ? Number(avg(pps).toFixed(1)) : null,
+              tg_tps_median: tgs.length ? Number(avg(tgs).toFixed(1)) : null,
+              draft_accepted: 0,
+              draft_total: 0,
+              draft_accept_pct: null,
+            },
+          });
+        });
+        return combined.sort((a, b) => (b._suitesCount - a._suitesCount) || (b.summary.pass_pct - a.summary.pass_pct));
+      }
+
+      function visibleRuns() {
+        const list = runsInGroup(state.suiteGroup, true, true);
+        if (state.suiteGroup === 'combined') return buildCombinedRuns(list);
+        return list;
       }
 
       function computeFrontier(points, xKey, yKey, lowerIsBetter) {
@@ -961,9 +1136,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       }
 
       function renderFiltersAndKpis() {
-        const hosts = Array.from(new Set(state.runs.map(r => r.host_label)));
-        const sf = document.getElementById('system-filters');
-        sf.innerHTML = '<span class="pills-label">System:</span>';
         const mkPill = (val, label, activeVal, onClick) => {
           const b = document.createElement('button');
           b.type = 'button';
@@ -972,42 +1144,63 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           b.onclick = onClick;
           return b;
         };
-        sf.appendChild(mkPill('all', 'All', state.systemFilter, () => { state.systemFilter = 'all'; renderAll(); }));
-        hosts.forEach(h => sf.appendChild(mkPill(h, h, state.systemFilter, () => { state.systemFilter = h; renderAll(); })));
 
-        const sep = document.createElement('span');
-        sep.className = 'pills-label';
-        sep.style.marginLeft = '10px';
-        sep.textContent = 'Suite:';
-        sf.appendChild(sep);
-        [['native', 'Native'], ['v1_compat', 'v1 Compat (16)']].forEach(([val, lbl]) => {
-          sf.appendChild(mkPill(val, lbl, state.suiteFilter, () => { state.suiteFilter = val; renderAll(); }));
+        const sfSuite = document.getElementById('suite-filters');
+        sfSuite.innerHTML = '<span class="pills-label">Suite:</span>';
+        const availGroups = SUITE_GROUPS.filter(g => g.id === 'combined' ? (new Set(state.runs.filter(r => state.showTainted || !isTaintedRun(r)).map(r => r.suite || 'v1')).size >= 2) : runsInGroup(g.id, false, false).length > 0);
+        if (availGroups.length && !availGroups.some(g => g.id === state.suiteGroup)) {
+          state.suiteGroup = availGroups[0].id;
+        }
+        availGroups.forEach(g => {
+          const cnt = g.id === 'combined' ? buildCombinedRuns(runsInGroup('combined', false, true)).length : runsInGroup(g.id, false, true).length;
+          const lbl = g.id === 'combined' ? `${g.label} (${cnt})` : `${g.label} · ${cnt}`;
+          const b = mkPill(g.id, lbl, state.suiteGroup, () => {
+            state.suiteGroup = g.id;
+            state.catFilter = 'all';
+            resetZoom();
+            renderAll();
+          });
+          b.title = g.desc;
+          sfSuite.appendChild(b);
         });
+        const curMeta = SUITE_GROUPS.find(g => g.id === state.suiteGroup) || SUITE_GROUPS[0];
+        document.getElementById('suite-explain').textContent = curMeta.desc;
+
+        const hosts = Array.from(new Set(state.runs.map(r => r.host_label)));
+        const sf = document.getElementById('system-filters');
+        sf.innerHTML = '<span class="pills-label">Rig:</span>';
+        sf.appendChild(mkPill('all', 'All Rigs', state.systemFilter, () => { state.systemFilter = 'all'; resetZoom(); renderAll(); }));
+        hosts.forEach(h => sf.appendChild(mkPill(h, h, state.systemFilter, () => { state.systemFilter = h; resetZoom(); renderAll(); })));
+
         const taintedCount = state.runs.filter(isTaintedRun).length;
         if (taintedCount > 0) {
           const tb = document.createElement('button');
           tb.type = 'button';
           tb.className = 'pill' + (state.showTainted ? ' active' : '');
-          tb.style.marginLeft = '10px';
+          tb.style.marginLeft = '8px';
           tb.textContent = `Show Tainted (${taintedCount})`;
+          tb.title = 'Include runs quarantined by perf_floor or hardware bottleneck checks';
           tb.onclick = () => { state.showTainted = !state.showTainted; renderAll(); };
           sf.appendChild(tb);
         }
 
+        const groupScopeAll = runsInGroup(state.suiteGroup, false, true);
+        const groupActive = runsInGroup(state.suiteGroup, true, true);
         const mq = document.getElementById('model-quick-filters');
         mq.innerHTML = '<span class="pills-label">Models:</span>';
-        const fams = Array.from(new Set(state.runs.map(r => r.family_key || 'other')));
+        const fams = Array.from(new Set(groupScopeAll.map(r => r.family_key || 'other')));
         fams.forEach(fk => {
-          const famRuns = state.runs.filter(r => (r.family_key || 'other') === fk);
-          const anyActive = famRuns.some(r => !state.disabledIds.has(r.run_id));
+          const famRuns = groupScopeAll.filter(r => (r.family_key || 'other') === fk);
+          const activeCnt = famRuns.filter(r => !state.disabledIds.has(r.run_id)).length;
+          const anyActive = activeCnt > 0;
           const meta = FAMILY_META[fk] || { label: fk, color: '#94a3b8' };
           const b = document.createElement('button');
           b.type = 'button';
           b.className = 'pill' + (anyActive ? ' active' : '');
           b.style.borderColor = anyActive ? meta.color : '';
           b.style.color = anyActive ? meta.color : '';
-          b.textContent = `${meta.label} (${famRuns.filter(r => !state.disabledIds.has(r.run_id)).length}/${famRuns.length})`;
-          b.title = `Click to toggle all ${meta.label} runs`;
+          b.textContent = `${meta.label} (${activeCnt}/${famRuns.length})`;
+          b.title = `Toggle ${meta.label} runs in ${curMeta.label}`;
           b.onclick = () => {
             if (anyActive) famRuns.forEach(r => state.disabledIds.add(r.run_id));
             else famRuns.forEach(r => state.disabledIds.delete(r.run_id));
@@ -1015,18 +1208,27 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           };
           mq.appendChild(b);
         });
+        if (groupScopeAll.some(r => state.disabledIds.has(r.run_id))) {
+          const rb = document.createElement('button');
+          rb.type = 'button';
+          rb.className = 'btn btn-ghost-sm';
+          rb.textContent = 'Enable All';
+          rb.onclick = () => { groupScopeAll.forEach(r => state.disabledIds.delete(r.run_id)); renderAll(); };
+          mq.appendChild(rb);
+        }
 
-        const totalActive = state.runs.filter(r => !state.disabledIds.has(r.run_id) && (state.systemFilter === 'all' || r.host_label === state.systemFilter)).length;
-        const totalAvail = state.runs.filter(r => state.systemFilter === 'all' || r.host_label === state.systemFilter).length;
-        document.getElementById('drawer-summary-text').textContent = `Runs (${totalActive}/${totalAvail})`;
-        document.getElementById('drawer-hint-text').textContent = state.drawerOpen ? 'Hide ▴' : 'Expand & toggle individual runs ▾';
-        document.getElementById('runs-count-pill').textContent = `${totalActive} / ${state.runs.length} Active`;
+        document.getElementById('drawer-summary-text').textContent = `Runs (${groupActive.length}/${groupScopeAll.length})`;
+        document.getElementById('drawer-hint-text').textContent = state.drawerOpen ? 'Hide ▴' : 'Toggle individual runs ▾';
+        document.getElementById('runs-count-pill').textContent = `${groupActive.length} / ${groupScopeAll.length} Active`;
 
         const drawer = document.getElementById('runs-drawer');
         drawer.classList.toggle('collapsed', !state.drawerOpen);
         drawer.innerHTML = '';
+        if (!groupScopeAll.length) {
+          drawer.innerHTML = '<div style="font-size:12px;color:var(--text-muted)">No runs in this Suite + Rig selection.</div>';
+        }
         fams.forEach(fk => {
-          const famRuns = state.runs.filter(r => (r.family_key || 'other') === fk && (state.systemFilter === 'all' || r.host_label === state.systemFilter));
+          const famRuns = groupScopeAll.filter(r => (r.family_key || 'other') === fk);
           if (!famRuns.length) return;
           const meta = FAMILY_META[fk] || { label: fk, color: '#94a3b8' };
           const grp = document.createElement('div');
@@ -1035,7 +1237,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           grp.querySelector('.act-all').onclick = () => { famRuns.forEach(r => state.disabledIds.delete(r.run_id)); renderAll(); };
           grp.querySelector('.act-none').onclick = () => { famRuns.forEach(r => state.disabledIds.add(r.run_id)); renderAll(); };
           grp.querySelector('.act-only').onclick = () => {
-            state.runs.forEach(r => state.disabledIds.add(r.run_id));
+            groupScopeAll.forEach(r => state.disabledIds.add(r.run_id));
             famRuns.forEach(r => state.disabledIds.delete(r.run_id));
             renderAll();
           };
@@ -1046,8 +1248,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             b.type = 'button';
             b.className = 'run-chip' + (active ? ' active' : '');
             b.style.setProperty('--chip-color', r.color);
-            const tag = [r.quant, r.draft_model ? '+Draft' : null, r.effort !== 'default' ? r.effort : null, r.subset !== 'all' ? r.subset : null, r.suite === 'v2' ? 'v2' : null].filter(Boolean).join(' · ');
-            b.innerHTML = `<span class="run-chip-left"><span class="run-chip-dot"></span><span>${esc(tag)} <span style="color:var(--text-muted)">(${esc(r.host_label)})</span></span></span><span class="run-chip-meta mono">${r.summary.pass_pct.toFixed(0)}% · ${r.summary.wall_median_s}s</span>`;
+            const suiteTag = state.suiteGroup === 'combined' ? (r.suite || 'v1') : (r._sliceTag || null);
+            const tag = [r.quant, r.draft_model ? '+Draft' : null, r.effort !== 'default' ? r.effort : null, suiteTag].filter(Boolean).join(' · ');
+            b.innerHTML = `<span class="run-chip-left"><span class="run-chip-dot"></span><span>${esc(tag || r.model)} <span style="color:var(--text-muted)">(${esc(r.host_label)})</span></span></span><span class="run-chip-meta mono">${r.summary.pass_pct.toFixed(0)}% · ${r.summary.wall_median_s}s</span>`;
             b.onclick = () => {
               if (active) state.disabledIds.add(r.run_id);
               else state.disabledIds.delete(r.run_id);
@@ -1058,21 +1261,24 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           drawer.appendChild(grp);
         });
 
-        const full = visibleRuns(false);
+        const plotted = visibleRuns();
         const kpi = document.getElementById('kpi-strip');
-        if (!full.length) {
-          kpi.innerHTML = '<div class="kpi-card"><span class="kpi-label">No full-suite runs active</span><span class="kpi-sub">Enable a run above.</span></div>';
+        if (!plotted.length) {
+          kpi.innerHTML = '<div class="kpi-card" style="grid-column:1/-1"><span class="kpi-label">No matching runs</span><span class="kpi-sub">Select another Suite, switch Rig to All Rigs, or re-enable models above.</span></div>';
           return;
         }
-        const bestAcc = [...full].sort((a, b) => b.summary.pass_pct - a.summary.pass_pct || a.summary.wall_median_s - b.summary.wall_median_s)[0];
-        const fastestWall = [...full].sort((a, b) => a.summary.wall_median_s - b.summary.wall_median_s)[0];
-        const lowestTok = [...full].sort((a, b) => a.summary.gen_tok_total - b.summary.gen_tok_total)[0];
-        const fastestTg = [...full].sort((a, b) => b.summary.tg_tps_median - a.summary.tg_tps_median)[0];
+        const bestAcc = [...plotted].sort((a, b) => b.summary.pass_pct - a.summary.pass_pct || a.summary.wall_median_s - b.summary.wall_median_s)[0];
+        const fastestWall = [...plotted].sort((a, b) => a.summary.wall_median_s - b.summary.wall_median_s)[0];
+        const lowestTok = [...plotted].sort((a, b) => (a.summary.gen_tok_median || Infinity) - (b.summary.gen_tok_median || Infinity))[0];
+        const validTg = plotted.filter(r => typeof r.summary.tg_tps_median === 'number' && r.summary.tg_tps_median > 0);
+        const fastestTg = (validTg.length ? validTg : plotted).sort((a, b) => (b.summary.tg_tps_median || 0) - (a.summary.tg_tps_median || 0))[0];
+        const accLabel = state.suiteGroup === 'combined' ? 'Highest Macro-Avg Pass@1' : 'Highest Pass@1';
+        const accSub = state.suiteGroup === 'combined' ? `${bestAcc._suitesCount} suites · ${bestAcc.summary.pass_count}/${bestAcc.summary.total_tasks} tasks` : `${bestAcc.summary.pass_count}/${bestAcc.summary.total_tasks}`;
         kpi.innerHTML = `
-          <div class="kpi-card"><span class="kpi-label">Highest Pass@1</span><span class="kpi-value mono" style="color:${bestAcc.color}">${bestAcc.summary.pass_pct.toFixed(1)}% (${bestAcc.summary.pass_count}/${bestAcc.summary.total_tasks})</span><span class="kpi-sub">${esc(runDisplayName(bestAcc))} · ${esc(bestAcc.host_label)}</span></div>
-          <div class="kpi-card"><span class="kpi-label">Fastest Median Wall</span><span class="kpi-value mono" style="color:${fastestWall.color}">${fastestWall.summary.wall_median_s}s</span><span class="kpi-sub">${esc(runDisplayName(fastestWall))} · ${fastestWall.summary.wall_total_min}m suite</span></div>
-          <div class="kpi-card"><span class="kpi-label">Most Token-Disciplined</span><span class="kpi-value mono" style="color:${lowestTok.color}">${lowestTok.summary.gen_tok_total.toLocaleString()} tok</span><span class="kpi-sub">${esc(runDisplayName(lowestTok))} · med ${lowestTok.summary.gen_tok_median} tok</span></div>
-          <div class="kpi-card"><span class="kpi-label">Peak Median Decode</span><span class="kpi-value mono" style="color:${fastestTg.color}">${fastestTg.summary.tg_tps_median} t/s</span><span class="kpi-sub">${esc(runDisplayName(fastestTg))} · pp ${fastestTg.summary.pp_tps_median} t/s</span></div>
+          <div class="kpi-card"><span class="kpi-label">${accLabel}</span><span class="kpi-value mono" style="color:${bestAcc.color}">${bestAcc.summary.pass_pct.toFixed(1)}% <span style="font-size:13px;font-weight:500;color:var(--text-secondary)">(${esc(accSub)})</span></span><span class="kpi-sub">${esc(runDisplayName(bestAcc))} · ${esc(bestAcc.host_label)}</span></div>
+          <div class="kpi-card"><span class="kpi-label">Fastest Median Wall</span><span class="kpi-value mono" style="color:${fastestWall.color}">${fastestWall.summary.wall_median_s}s</span><span class="kpi-sub">${esc(runDisplayName(fastestWall))} · ${fastestWall.summary.wall_total_min}m total</span></div>
+          <div class="kpi-card"><span class="kpi-label">Lowest Median Tokens</span><span class="kpi-value mono" style="color:${lowestTok.color}">${(lowestTok.summary.gen_tok_median || 0).toLocaleString()} tok</span><span class="kpi-sub">${esc(runDisplayName(lowestTok))} · ${lowestTok.summary.gen_tok_total.toLocaleString()} total</span></div>
+          <div class="kpi-card"><span class="kpi-label">Peak Median Decode</span><span class="kpi-value mono" style="color:${fastestTg.color}">${fastestTg.summary.tg_tps_median || '—'} t/s</span><span class="kpi-sub">${esc(runDisplayName(fastestTg))} · pp ${fastestTg.summary.pp_tps_median || '—'} t/s</span></div>
         `;
       }
 
@@ -1133,29 +1339,43 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       }
 
       function renderOverall() {
+        const allPlotted = visibleRuns();
+        const axisValue = (r, key) => key === 'wall_mean_s' ? meanWall(r.summary) : (r.summary[key] || 0);
+        document.querySelectorAll('#axis-pills-group .pill[data-axis]').forEach(b => {
+          const axKey = b.dataset.axis;
+          const hasAny = allPlotted.some(r => axisValue(r, axKey) > 0);
+          b.style.display = hasAny || !allPlotted.length ? '' : 'none';
+          b.classList.toggle('active', axKey === state.axis);
+        });
+        if (allPlotted.length && !allPlotted.some(r => axisValue(r, state.axis) > 0)) {
+          state.axis = 'wall_median_s';
+          document.querySelectorAll('#axis-pills-group .pill[data-axis]').forEach(b => b.classList.toggle('active', b.dataset.axis === state.axis));
+        }
         const cfg = AXIS_CONFIG[state.axis];
-        const fullRuns = visibleRuns(false);
-        const subsetRuns = (state.showSubsetsOnOverall && cfg.key !== 'wall_total_min')
-          ? visibleRuns(true).filter(r => r.subset && r.subset !== 'all')
-          : [];
-        const allPlotted = [...fullRuns, ...subsetRuns];
         const pts = allPlotted.map(r => ({
           run: r,
           id: r.run_id,
-          isSubset: Boolean(r.subset && r.subset !== 'all'),
           color: r.color,
-          shape: r.shape || (r.subset && r.subset !== 'all' ? 'diamond' : 'circle'),
+          shape: r.shape || 'circle',
           passPct: r.summary.pass_pct,
-          xVal: cfg.key === 'wall_mean_s' ? meanWall(r.summary) : (r.summary[cfg.key] || 0),
+          xVal: axisValue(r, cfg.key),
         })).filter(p => p.xVal > 0);
 
-        document.getElementById('chart-context-tag').textContent = `Y: Pass@1 (%)  •  X: ${cfg.shortLabel}  •  Scroll/pinch zoom, drag pan, click dot to pin`;
+        const yDesc = state.suiteGroup === 'combined' ? 'Macro-Avg Pass@1 (%)' : 'Pass@1 (%)';
+        document.getElementById('chart-context-tag').textContent = `Y: ${yDesc}  •  X: ${cfg.shortLabel}  •  Scroll/pinch zoom, drag pan, click dot to pin`;
         const maxVal = pts.length ? Math.max(...pts.map(p => p.xVal)) : 100;
         const { max: baseXMax } = getNiceScale(maxVal * 1.15);
         const dom = curDomain(baseXMax);
         const layer = renderBaseGrid(dom, cfg.label, cfg.unit, cfg.badge, cfg.lowerIsBetter);
 
-        const front = computeFrontier(pts.filter(p => !p.isSubset), 'xVal', 'passPct', cfg.lowerIsBetter);
+        if (!pts.length) {
+          layer.appendChild(el('text', { x: PAD.left + PLOT_W / 2, y: PAD.top + PLOT_H / 2, fill: '#64748b', 'font-size': 13, 'text-anchor': 'middle' }, 'No runs match the current Suite, Rig & Model filters.'));
+          document.getElementById('chart-legend').innerHTML = '';
+          renderScoreboard([], new Set());
+          return;
+        }
+
+        const front = computeFrontier(pts, 'xVal', 'passPct', cfg.lowerIsBetter);
         const frontIds = new Set(front.map(p => p.id));
         renderFrontierPath(layer, front, 'xVal', 'passPct', dom, cfg.lowerIsBetter);
 
@@ -1185,8 +1405,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
           const title = runDisplayName(p.run);
           const valStr = cfg.key === 'gen_tok_median' ? `${p.xVal.toLocaleString()} tok` : `${p.xVal}${cfg.unit}`;
-          const subTag = p.isSubset ? ` (${p.run.summary.pass_count}/${p.run.summary.total_tasks})` : '';
-          const sub = `${p.passPct.toFixed(1)}% @ ${valStr}${subTag} · ${p.run.host_label}`;
+          const subExtra = state.suiteGroup === 'combined' ? ` (${p.run._suitesCount}s)` : '';
+          const sub = `${p.passPct.toFixed(1)}%${subExtra} @ ${valStr} · ${p.run.host_label}`;
           const w = Math.max(title.length * 7.2, sub.length * 6.7) + 10;
           const preferUp = isFront || p.passPct >= maxPass - 2.0 || idx === 0;
           const box = placeSmartLabel(cx, cy, w, 28, preferUp, labelBoxes, dotBoxes);
@@ -1210,8 +1430,24 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       }
 
       function renderCategory() {
-        const runs = visibleRuns(true);
-        const cats = state.catFilter === 'all' ? ['coding', 'reasoning', 'structured', 'long_context', 'agent_tools', 'ops_and_voice', 'frontier_ceiling'] : [state.catFilter];
+        const runs = visibleRuns();
+        const availCats = Array.from(new Set(runs.flatMap(r => Object.keys(r.categories || {}))));
+        if (state.catFilter !== 'all' && !availCats.includes(state.catFilter)) state.catFilter = 'all';
+
+        const catBar = document.getElementById('cat-pills-group');
+        catBar.innerHTML = '<span class="pills-label">Category:</span>';
+        const mkCatPill = (val, label) => {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'pill' + (state.catFilter === val ? ' active' : '');
+          b.textContent = label;
+          b.onclick = () => { state.catFilter = val; renderAll(); };
+          return b;
+        };
+        catBar.appendChild(mkCatPill('all', 'All Categories'));
+        availCats.forEach(ck => catBar.appendChild(mkCatPill(ck, (CAT_META[ck] && CAT_META[ck].label) || ck)));
+
+        const cats = state.catFilter === 'all' ? availCats : [state.catFilter];
         const pts = [];
         runs.forEach(r => {
           cats.forEach(ck => {
@@ -1230,6 +1466,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         const { max: baseXMax } = getNiceScale(maxVal * 1.15);
         const dom = curDomain(baseXMax);
         const layer = renderBaseGrid(dom, 'Category Median Wall Time (seconds)', 's', '↖ Better (Faster & More Accurate)', true);
+
+        if (!pts.length) {
+          layer.appendChild(el('text', { x: PAD.left + PLOT_W / 2, y: PAD.top + PLOT_H / 2, fill: '#64748b', 'font-size': 13, 'text-anchor': 'middle' }, 'No category breakdown available for the current filter.'));
+          document.getElementById('chart-legend').innerHTML = '';
+          renderScoreboard(runs, new Set());
+          return;
+        }
 
         const front = computeFrontier(pts, 'medianWall', 'passPct', true);
         const frontIds = new Set(front.map(p => p.id));
@@ -1250,11 +1493,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           const cx = sx(p.medianWall, dom), cy = sy(p.passPct, dom);
           const isFront = frontIds.has(p.id), isPinned = state.pinnedIds.has(p.id);
           const inView = cx >= PAD.left - 8 && cx <= PAD.left + PLOT_W + 8 && cy >= PAD.top - 8 && cy <= PAD.top + PLOT_H + 8;
-          const showStatic = inView && (isPinned || (state.catLabelMode === 'frontier' && isFront));
+          const showStatic = inView && (isPinned || state.labelMode === 'all' || (state.labelMode === 'frontier' && isFront));
           const lg = el('g');
           lg.style.display = showStatic ? 'inline' : 'none';
           lg.dataset.keep = showStatic ? '1' : '0';
-          const lbl = `${CAT_META[p.cat].short} · ${runDisplayName(p.run)} (${p.medianWall}s)`;
+          const cShort = (CAT_META[p.cat] && CAT_META[p.cat].short) || p.cat;
+          const lbl = `${cShort} · ${runDisplayName(p.run)} (${p.medianWall}s)`;
           const box = placeSmartLabel(cx, cy, lbl.length * 6.7 + 8, 16, isFront || idx === 0, labelBoxes, dotBoxes);
           if (showStatic) labelBoxes.push({ x0: box.bx0, x1: box.bx1, y0: box.by0, y1: box.by1 });
           lg.appendChild(el('text', { class: 'lbl-halo', x: box.lx, y: box.ly, fill: p.color, 'font-size': 10.5, 'font-weight': 600, 'font-family': 'ui-monospace, monospace', 'text-anchor': box.anchor }, lbl));
@@ -1267,13 +1511,18 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           `<span class="legend-item"><span class="legend-swatch" style="background:${r.color}"></span>${esc(runDisplayName(r))}</span>`
         ).join('') + '<span class="legend-item"><span class="legend-dash"></span>Pareto Frontier</span>';
 
-        renderScoreboard(visibleRuns(false), new Set());
+        renderScoreboard(runs, new Set());
       }
 
       function renderMatrix() {
-        const runs = visibleRuns(false);
         const stage = document.getElementById('matrix-stage');
-        if (!runs.length) { stage.innerHTML = '<div style="padding:18px;color:var(--text-secondary)">Enable at least one full-suite run above.</div>'; return; }
+        if (state.suiteGroup === 'combined') {
+          stage.innerHTML = '<div style="padding:20px;color:var(--text-secondary)">Task Matrix compares individual prompts within one comparable Suite. Pick <strong>v3 (28 Tasks)</strong>, <strong>v1 Core</strong>, <strong>Frontier</strong>, <strong>Extended v4</strong>, or <strong>Agentic</strong> above to view per-task results.</div>';
+          document.getElementById('chart-context-tag').textContent = 'Select a single Suite above for Task Matrix';
+          return;
+        }
+        const runs = visibleRuns();
+        if (!runs.length) { stage.innerHTML = '<div style="padding:18px;color:var(--text-secondary)">No runs match the active filters — try enabling runs or switching Rig/Suite above.</div>'; return; }
         const taskIds = Array.from(new Set(runs.flatMap(r => (r.tasks || []).map(t => t.id))));
         let htmlStr = '<table><thead><tr><th>Task</th><th>Category</th>' + runs.map(r => `<th><span style="color:${r.color}">${esc(runDisplayName(r))}</span><br><span style="font-weight:400;color:var(--text-muted)">${esc(r.host_label)}</span></th>`).join('') + '</tr></thead><tbody>';
         taskIds.forEach(tid => {
@@ -1284,7 +1533,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             if (!t) { htmlStr += '<td class="mono" style="color:var(--text-muted)">—</td>'; return; }
             const b = t.passed ? '<span class="badge-pass">PASS</span>' : (t.finish_reason === 'length' ? '<span class="badge-trunc">TRUNC</span>' : '<span class="badge-fail">FAIL</span>');
             const acc = t.draft_n ? ` · ${t.draft_n_accepted}/${t.draft_n}` : '';
-            htmlStr += `<td class="mono">${b} ${t.wall_s.toFixed(1)}s <span style="color:var(--text-secondary)">(${t.predicted_n}t @ ${t.tg_tps}t/s${acc})</span></td>`;
+            const sp = t.tg_tps != null ? ` @ ${t.tg_tps}t/s` : '';
+            htmlStr += `<td class="mono">${b} ${t.wall_s.toFixed(1)}s <span style="color:var(--text-secondary)">(${t.predicted_n}t${sp}${acc})</span></td>`;
           });
           htmlStr += '</tr>';
         });
@@ -1338,27 +1588,51 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       function renderScoreboard(runs, frontIds) {
         const wrap = document.getElementById('scoreboard-wrap');
         if (!runs.length) { wrap.innerHTML = ''; return; }
-        let rowsHtml = runs.map((r, idx) => {
-          const s = r.summary;
-          const tBadge = isTaintedRun(r) ? '<span class="badge-trunc" style="margin-left:6px;background:rgba(239,68,68,0.22);color:#fca5a5;">TAINTED</span>' : '';
-          const badge = frontIds.has(r.run_id) ? '<span class="badge-win">Pareto</span>' : '';
-          const draftStr = s.draft_total ? ` (${s.draft_accept_pct}% draft)` : '';
-          const mw = meanWall(s);
-          const lv = r.llama_version && (r.llama_version.props_build_info || r.llama_version.label);
-          const pwr = r.power_telemetry && r.power_telemetry.available ? `${r.power_telemetry.system_avg_w}W · ${r.power_telemetry.system_wh}Wh` : '';
-          const subMeta = [r.host_label, r.backend, lv, pwr].filter(Boolean).join(' · ');
-          return `<tr data-sb-idx="${idx}" style="cursor:pointer;">
-            <td><span class="legend-swatch" style="background:${r.color};margin-right:6px"></span><strong>${esc(runDisplayName(r))}</strong>${badge}${tBadge}<div style="font-size:11px;color:var(--text-muted)">${esc(subMeta)}</div></td>
-            <td class="mono" style="color:${r.color};font-weight:700">${s.pass_pct.toFixed(1)}% (${s.pass_count}/${s.total_tasks})</td>
-            <td class="mono">${s.truncated}</td>
-            <td class="mono">${s.wall_median_s}s / ${mw}s / ${s.wall_p90_s || '—'}s</td>
-            <td class="mono">${s.wall_total_min}m (${s.wall_total_s}s)</td>
-            <td class="mono">${s.gen_tok_total.toLocaleString()} (${s.gen_tok_median})</td>
-            <td class="mono">${s.pp_tps_median} / ${s.tg_tps_median} t/s${draftStr}</td>
-            <td class="mono">${esc(r.mem_label || '—')}</td>
-          </tr>`;
-        }).join('');
-        wrap.innerHTML = `<table><thead><tr><th>Run / System</th><th>Pass@1</th><th>Trunc</th><th>Med / Mean / p90</th><th>Suite Time</th><th>Output Tok (Med)</th><th>Prefill / Decode</th><th>Memory</th></tr></thead><tbody>${rowsHtml}</tbody></table>`;
+        if (state.suiteGroup === 'combined') {
+          const fmtSuite = (sMap, key) => {
+            const x = sMap && sMap[key];
+            if (!x || !x.summary) return '<td class="mono" style="color:var(--text-muted)">—</td>';
+            return `<td class="mono">${x.summary.pass_pct.toFixed(1)}% <span style="color:var(--text-muted)">(${x.summary.pass_count}/${x.summary.total_tasks})</span></td>`;
+          };
+          const rowsHtml = runs.map((r, idx) => {
+            const s = r.summary;
+            const badge = frontIds.has(r.run_id) ? '<span class="badge-win">Pareto</span>' : '';
+            return `<tr data-sb-idx="${idx}" style="cursor:pointer;">
+              <td><span class="legend-swatch" style="background:${r.color};margin-right:6px"></span><strong>${esc(runDisplayName(r))}</strong>${badge}<div style="font-size:11px;color:var(--text-muted)">${esc(r.host_label)}</div></td>
+              <td class="mono">${r._suitesCount}</td>
+              <td class="mono" style="color:${r.color};font-weight:700">${s.pass_pct.toFixed(1)}%</td>
+              ${fmtSuite(r._suiteScores, 'v3')}
+              ${fmtSuite(r._suiteScores, 'extended_v4')}
+              ${fmtSuite(r._suiteScores, 'agentic')}
+              ${fmtSuite(r._suiteScores, 'v1')}
+              <td class="mono">${s.wall_median_s}s</td>
+              <td class="mono">${s.tg_tps_median || '—'} / ${s.pp_tps_median || '—'} t/s</td>
+            </tr>`;
+          }).join('');
+          wrap.innerHTML = `<table><thead><tr><th>Config / Rig</th><th>Suites</th><th>Macro-Avg</th><th>v3 (28t)</th><th>Ext-v4 (6t)</th><th>Agentic (11t)</th><th>v1 (16t)</th><th>Avg Med Wall</th><th>Decode / Prefill</th></tr></thead><tbody>${rowsHtml}</tbody></table>`;
+        } else {
+          const rowsHtml = runs.map((r, idx) => {
+            const s = r.summary;
+            const tBadge = isTaintedRun(r) ? '<span class="badge-trunc" style="margin-left:6px;background:rgba(239,68,68,0.22);color:#fca5a5;">TAINTED</span>' : '';
+            const badge = frontIds.has(r.run_id) ? '<span class="badge-win">Pareto</span>' : '';
+            const draftStr = s.draft_total ? ` (${s.draft_accept_pct}% draft)` : '';
+            const mw = meanWall(s);
+            const lv = r.llama_version && (r.llama_version.props_build_info || r.llama_version.label);
+            const pwr = r.power_telemetry && r.power_telemetry.available ? `${r.power_telemetry.system_avg_w}W · ${r.power_telemetry.system_wh}Wh` : '';
+            const subMeta = [r.host_label, r.backend, lv, pwr].filter(Boolean).join(' · ');
+            return `<tr data-sb-idx="${idx}" style="cursor:pointer;">
+              <td><span class="legend-swatch" style="background:${r.color};margin-right:6px"></span><strong>${esc(runDisplayName(r))}</strong>${badge}${tBadge}<div style="font-size:11px;color:var(--text-muted)">${esc(subMeta)}</div></td>
+              <td class="mono" style="color:${r.color};font-weight:700">${s.pass_pct.toFixed(1)}% (${s.pass_count}/${s.total_tasks})</td>
+              <td class="mono">${s.truncated}</td>
+              <td class="mono">${s.wall_median_s}s / ${mw}s / ${s.wall_p90_s || '—'}s</td>
+              <td class="mono">${s.wall_total_min}m (${s.wall_total_s}s)</td>
+              <td class="mono">${s.gen_tok_total.toLocaleString()} (${s.gen_tok_median})</td>
+              <td class="mono">${s.pp_tps_median ?? '—'} / ${s.tg_tps_median ?? '—'} t/s${draftStr}</td>
+              <td class="mono">${esc(r.mem_label || '—')}</td>
+            </tr>`;
+          }).join('');
+          wrap.innerHTML = `<table><thead><tr><th>Run / System</th><th>Pass@1</th><th>Trunc</th><th>Med / Mean / p90</th><th>Suite Time</th><th>Output Tok (Med)</th><th>Prefill / Decode</th><th>Memory</th></tr></thead><tbody>${rowsHtml}</tbody></table>`;
+        }
         wrap.querySelectorAll('tbody tr[data-sb-idx]').forEach(tr => {
           const r = runs[Number(tr.dataset.sbIdx)];
           const payload = { ...r, _isFront: frontIds.has(r.run_id) };
@@ -1372,15 +1646,17 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         if (kind === 'overall') {
           const s = p.summary;
           const mw = meanWall(s);
-          const summaryText = buildRunInsight(p, Boolean(p._isFront));
+          const summaryText = p._suiteScores
+            ? `Macro-average across ${p._suitesCount} suite(s): ` + Object.entries(p._suiteScores).map(([k, v]) => `${k} ${v.summary.pass_pct.toFixed(1)}%`).join(' · ')
+            : buildRunInsight(p, Boolean(p._isFront));
           tooltipEl.innerHTML = `
             <div class="tt-header"><span class="tt-title">${esc(runDisplayName(p))}</span><span class="tt-tag" style="background:rgba(148,163,184,0.16);color:${p.color}">${esc(p.host_label)}</span></div>
             <div class="tt-grid">
-              <span class="tt-k">Pass@1</span><span class="tt-v" style="color:${p.color}">${s.pass_pct.toFixed(1)}% (${s.pass_count}/${s.total_tasks})</span>
+              <span class="tt-k">${p._suiteScores ? 'Macro-Avg Pass@1' : 'Pass@1'}</span><span class="tt-v" style="color:${p.color}">${s.pass_pct.toFixed(1)}% (${s.pass_count}/${s.total_tasks})</span>
               <span class="tt-k">Med / Mean / p90</span><span class="tt-v">${s.wall_median_s}s / ${mw}s / ${s.wall_p90_s || '—'}s</span>
               <span class="tt-k">Suite Time</span><span class="tt-v">${s.wall_total_min}m (${s.wall_total_s}s)</span>
               <span class="tt-k">Output Tokens</span><span class="tt-v">${s.gen_tok_total.toLocaleString()} (med ${s.gen_tok_median})</span>
-              <span class="tt-k">Prefill / Decode</span><span class="tt-v">${s.pp_tps_median} / ${s.tg_tps_median} t/s</span>
+              <span class="tt-k">Prefill / Decode</span><span class="tt-v">${s.pp_tps_median ?? '—'} / ${s.tg_tps_median ?? '—'} t/s</span>
               <span class="tt-k">Draft Accept</span><span class="tt-v">${s.draft_total ? s.draft_accept_pct + '% (' + s.draft_accepted + '/' + s.draft_total + ')' : '—'}</span>
               <span class="tt-k">Memory</span><span class="tt-v">${esc(p.mem_label || '—')}</span>
               <span class="tt-k">Build / Power</span><span class="tt-v">${esc((p.llama_version && (p.llama_version.props_build_info || p.llama_version.label)) || '—')} · ${p.power_telemetry && p.power_telemetry.available ? `${p.power_telemetry.system_avg_w}W (${p.power_telemetry.system_wh}Wh)` : '—'}</span>
@@ -1388,10 +1664,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             </div>
             <div class="tt-summary" style="border-left-color:${p.color}">${esc(summaryText)}</div>`;
         } else {
+          const cLabel = (CAT_META[p.cat] && CAT_META[p.cat].label) || p.cat;
           const cObj = (p.run.categories && p.run.categories[p.cat]) || {};
-          const catNote = p._isFront ? `Category Pareto frontier (${p.passPct}% @ ${p.medianWall}s).` : `${CAT_META[p.cat].label}: ${p.passCount}/${p.total} (${p.passPct}%) @ ${p.medianWall}s med (${cObj.gen_tok_median || '—'} med tok).`;
+          const catNote = p._isFront ? `Category Pareto frontier (${p.passPct}% @ ${p.medianWall}s).` : `${cLabel}: ${p.passCount}/${p.total} (${p.passPct}%) @ ${p.medianWall}s med (${cObj.gen_tok_median || '—'} med tok).`;
           tooltipEl.innerHTML = `
-            <div class="tt-header"><span class="tt-title">${esc(runDisplayName(p.run))}</span><span class="tt-tag" style="background:rgba(148,163,184,0.16);color:${p.color}">${CAT_META[p.cat].label}</span></div>
+            <div class="tt-header"><span class="tt-title">${esc(runDisplayName(p.run))}</span><span class="tt-tag" style="background:rgba(148,163,184,0.16);color:${p.color}">${esc(cLabel)}</span></div>
             <div class="tt-grid">
               <span class="tt-k">System</span><span class="tt-v">${esc(p.run.host_label)}</span>
               <span class="tt-k">Category Pass@1</span><span class="tt-v" style="color:${p.color}">${p.passPct}% (${p.passCount}/${p.total})</span>
@@ -1475,32 +1752,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           renderAll();
         };
       });
-      document.querySelectorAll('#controls-overall .pill[data-lbl]').forEach(b => {
+      function syncLblPills() {
+        document.querySelectorAll('#lbl-pills-group .pill[data-lbl], #cat-lbl-pills-group .pill[data-lbl]').forEach(x => {
+          x.classList.toggle('active', x.dataset.lbl === state.labelMode);
+        });
+      }
+      document.querySelectorAll('#lbl-pills-group .pill[data-lbl], #cat-lbl-pills-group .pill[data-lbl]').forEach(b => {
         b.onclick = () => {
-          document.querySelectorAll('#controls-overall .pill[data-lbl]').forEach(x => x.classList.remove('active'));
-          b.classList.add('active');
           state.labelMode = b.dataset.lbl;
-          renderAll();
-        };
-      });
-      document.getElementById('toggle-subsets-overall').onclick = (e) => {
-        state.showSubsetsOnOverall = !state.showSubsetsOnOverall;
-        e.currentTarget.classList.toggle('active', state.showSubsetsOnOverall);
-        renderAll();
-      };
-      document.querySelectorAll('#controls-category .pill[data-cat]').forEach(b => {
-        b.onclick = () => {
-          document.querySelectorAll('#controls-category .pill[data-cat]').forEach(x => x.classList.remove('active'));
-          b.classList.add('active');
-          state.catFilter = b.dataset.cat;
-          renderAll();
-        };
-      });
-      document.querySelectorAll('#controls-category .pill[data-lbl-cat]').forEach(b => {
-        b.onclick = () => {
-          document.querySelectorAll('#controls-category .pill[data-lbl-cat]').forEach(x => x.classList.remove('active'));
-          b.classList.add('active');
-          state.catLabelMode = b.dataset.lblCat;
+          syncLblPills();
           renderAll();
         };
       });
@@ -1512,12 +1772,24 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             const parsed = JSON.parse(await file.text());
             const items = Array.isArray(parsed) ? parsed : [parsed];
             items.forEach(item => {
-              if (!item || item.schema !== 'salted-eval/v1') return;
+              if (!item) return;
+              const okSchema = item.schema === 'salted-eval/v1' || (item.schema_version === 1 && (item.suite === 'extended_v4' || item.suite === 'agentic'));
+              if (!okSchema) return;
               const existingIdx = state.runs.findIndex(r => r.run_id === item.run_id);
               const mlow = (item.model || '').toLowerCase();
               const fam = mlow.includes('inkling') ? 'inkling' : (mlow.includes('flash') ? 'qwflash' : (mlow.includes('122b') ? 'qw35' : ((mlow.includes('27b') || mlow.includes('3.8')) ? 'qw38' : ((mlow.includes('35b') || mlow.includes('3.6')) ? 'qw36' : (mlow.includes('gemma') ? 'gemma' : (mlow.includes('lfm') ? 'lfm' : (mlow.includes('phi') ? 'phi' : ((mlow.includes('qwen3-4b') || mlow.includes('qwen3.5')) ? 'qw3' : 'other'))))))));
               const color = item.color || FAMILY_META[fam].color;
-              const norm = { ...item, family_key: fam, family_label: FAMILY_META[fam].label, color, shape: item.shape || (item.draft_model ? 'hex' : 'circle') };
+              let cats = item.categories;
+              if ((!cats || !Object.keys(cats).length) && Array.isArray(item.tasks)) {
+                cats = {};
+                const byC = {};
+                item.tasks.forEach(t => { const ck = t.category || 'general'; (byC[ck] = byC[ck] || []).push(t); });
+                Object.entries(byC).forEach(([ck, arr]) => {
+                  const pc = arr.filter(t => t.passed).length;
+                  cats[ck] = { pass_count: pc, total: arr.length, pass_pct: Number((100 * pc / Math.max(1, arr.length)).toFixed(1)), wall_median_s: Number(medianNum(arr.map(t => t.wall_s || 0)).toFixed(2)) };
+                });
+              }
+              const norm = { ...item, suite: item.suite || 'v1', subset: item.subset || 'all', categories: cats || {}, family_key: fam, family_label: FAMILY_META[fam].label, color, shape: item.shape || (item.draft_model ? 'hex' : 'circle') };
               if (existingIdx >= 0) state.runs[existingIdx] = norm;
               else { state.runs.push(norm); state.addedIds.push(norm.run_id); }
               added++;
@@ -1546,8 +1818,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         const pp = parseFloat(document.getElementById('m-pp').value || '400');
         const tg = parseFloat(document.getElementById('m-tg').value || '35');
         const rid = `manual-${Date.now()}`;
+        const tgtSuite = (state.suiteGroup === 'combined' || state.suiteGroup === 'frontier') ? 'v3' : state.suiteGroup;
         state.runs.push({
           schema: 'salted-eval/v1', run_id: rid, phase: 'Preview', seed: 20261124,
+          suite: tgtSuite,
           host_label: host, family_key: 'other', family_label: 'Custom', backend: 'Manual Preview', model: label, quant: '', effort: 'default', subset: 'all',
           mem_label: '—', color: '#facc15', shape: 'hex',
           summary: {
@@ -1576,11 +1850,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       document.getElementById('export-csv-btn').onclick = () => {
         const hdr = ['run_id', 'model', 'quant', 'effort', 'suite', 'subset', 'system', 'llama_build', 'pass_pct', 'pass_count', 'total_tasks', 'truncated', 'wall_median_s', 'wall_mean_s', 'wall_total_min', 'gen_tok_median', 'pp_tps_median', 'tg_tps_median', 'draft_accept_pct', 'sys_avg_w', 'sys_wh'];
         const csvCell = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
-        const rows = visibleRuns(true).map(r => {
+        const rows = visibleRuns().map(r => {
           const s = r.summary || {};
           const lv = r.llama_version && (r.llama_version.props_build_info || r.llama_version.label);
           const pw = r.power_telemetry && r.power_telemetry.available ? r.power_telemetry : {};
-          return [r.run_id, r.model, r.quant, r.effort, r.suite || 'v1', r.subset || 'all', r.host_label, lv ?? '', s.pass_pct, s.pass_count, s.total_tasks, s.truncated, s.wall_median_s, meanWall(s), s.wall_total_min, s.gen_tok_median, s.pp_tps_median, s.tg_tps_median, s.draft_accept_pct ?? '', pw.system_avg_w ?? '', pw.system_wh ?? ''].map(csvCell).join(',');
+          return [r.run_id, r.model, r.quant, r.effort, r.suite || state.suiteGroup, r.subset || 'all', r.host_label, lv ?? '', s.pass_pct, s.pass_count, s.total_tasks, s.truncated, s.wall_median_s, meanWall(s), s.wall_total_min, s.gen_tok_median, s.pp_tps_median ?? '', s.tg_tps_median ?? '', s.draft_accept_pct ?? '', pw.system_avg_w ?? '', pw.system_wh ?? ''].map(csvCell).join(',');
         });
         const blob = new Blob([[hdr.join(','), ...rows].join('\n')], { type: 'text/csv;charset=utf-8' });
         const url = URL.createObjectURL(blob);
@@ -1799,13 +2073,27 @@ def selftest() -> None:
         },
         "categories": {"coding": {"pass_count": 3, "total": 4, "pass_pct": 75.0, "wall_median_s": 79.9}},
         "tasks": [{"id": "code_vm_salt", "category": "coding", "passed": True, "wall_s": 36.0, "pp_tps": 155.5, "tg_tps": 29.3, "predicted_n": 981, "finish_reason": "stop"}],
+    }, {
+        "schema_version": 1,
+        "suite": "agentic",
+        "run_id": "agentic-node2-qwflash-med-mtp",
+        "host_label": "node2",
+        "model": "Qwen3.8-Flash-Next",
+        "quant": "UD-Q4_K_XL",
+        "effort": "medium",
+        "summary": {"pass_count": 10, "total_tasks": 11, "pass_pct": 90.9, "truncated": 0, "wall_total_s": 480.0, "wall_total_min": 8.0, "wall_median_s": 36.4, "gen_tok_total": 14000, "gen_tok_median": 990, "pp_tps_median": None, "tg_tps_median": 29.3},
+        "tasks": [{"id": "agent_read_patch_verify", "category": "agent_harness", "passed": True, "wall_s": 36.4, "predicted_n": 990, "tg_tps": 29.3, "finish_reason": "tool_calls"}],
     }]
     with tempfile.TemporaryDirectory() as td:
         p = Path(td) / "run.json"
         p.write_text(json.dumps(sample))
         runs_anon = load_runs([Path(td)], anonymize=True)
+        assert len(runs_anon) == 2
         assert runs_anon[0]["host_label"] == "Rig A (8 GB CUDA)"
         assert runs_anon[0]["family_key"] == "inkling"
+        assert runs_anon[1]["suite"] == "agentic"
+        assert runs_anon[1]["draft_model"] == "mtp"
+        assert "agent_harness" in runs_anon[1]["categories"]
         assert "url" not in runs_anon[0]
         assert "/home/alice" not in runs_anon[0]["notes"] and "10.99.0.1" not in runs_anon[0]["notes"]
         out_html = build_html(runs_anon, "Pareto Test", "Anonymized")
