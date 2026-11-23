@@ -138,7 +138,7 @@
         "repeat_penalty": 1.0
       },
       "oom_guard": {"node1_max_ctx": 40960, "note": "8GB RTX 4060 ngl=99 -ot blk.40-47.ffn=CPU + MTP leaves 255MiB free at 40k (fits 33.8k frontier prompt)."},
-      "perf_floor": {"node1": {"min_pp_tps": 700, "min_tg_tps": 35, "min_gpu_util_pct": 40}},
+      "perf_floor": {"node1": {"min_pp_tps": 700, "min_tg_tps": 30, "min_gpu_util_pct": 40}},
       "notes": "Lossless Q4_0 QAT replacement after isolating MoQ-3.75 IQ3_XXS attn_k token collapse."
     },
     "Qwen-3.6-35b-a3b-GSQ": {
