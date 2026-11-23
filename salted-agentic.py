@@ -917,7 +917,412 @@ def build_agentic_tasks(seed: int = DEFAULT_SEED) -> list[dict[str, Any]]:
 
     t11["grade"] = grade_t11
 
-    return [t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11]
+    # --- HARD FRONTIER AGENTIC TASKS (Multi-file + Misleading Green Tests) ---
+    # Task 12: Cross-file shallow-copy aliasing + non-atomic batch rollback (existing test passes!)
+    tx_fee = rng.randint(5, 19)
+    tx_amt = rng.randint(40, 95)
+
+    t12 = {
+        "id": "agent_hard_aliased_rollback",
+        "category": "frontier_agentic",
+        "prompt": (
+            "Audit `docs/INVARIANTS.md`, `engine/ledger.py`, and `engine/tx.py`. Note that `pytest` (`tests/test_tx.py`) "
+            "currently passes, so do NOT assume the code is bug-free. Identify and fix ALL invariant violations across "
+            "`engine/ledger.py` and `engine/tx.py`, add non-trivial regression tests in `tests/test_tx.py`, run `pytest`, "
+            "and submit."
+        ),
+        "files": {
+            "docs/INVARIANTS.md": (
+                "# Ledger & Transaction Invariants\n"
+                "1. Rollback must restore ALL account balances AND nested `tags` lists with zero shared-reference aliasing.\n"
+                "2. `apply_batch(ledger, ops)` MUST be strictly atomic: if ANY op raises ValueError (negative amount, "
+                "missing account, or insufficient funds), EVERY earlier op in the batch must be rolled back completely.\n"
+            ),
+            "engine/ledger.py": (
+                "class Ledger:\n"
+                "    def __init__(self, accounts: dict | None = None):\n"
+                "        self.accounts = accounts if accounts is not None else {}\n\n"
+                "    def snapshot(self) -> dict:\n"
+                "        # BUG: shallow copy aliases nested account dicts and tag lists\n"
+                "        return dict(self.accounts)\n\n"
+                "    def restore(self, snap: dict) -> None:\n"
+                "        self.accounts = dict(snap)\n"
+            ),
+            "engine/tx.py": (
+                "from engine.ledger import Ledger\n\n"
+                "def apply_op(ledger: Ledger, acct: str, delta: int, tag: str | None = None) -> None:\n"
+                "    if acct not in ledger.accounts:\n"
+                "        raise ValueError(f'missing account: {acct}')\n"
+                "    rec = ledger.accounts[acct]\n"
+                "    if rec['balance'] + delta < 0:\n"
+                "        raise ValueError('insufficient funds')\n"
+                "    rec['balance'] += delta\n"
+                "    if tag:\n"
+                "        rec['tags'].append(tag)\n\n"
+                "def apply_batch(ledger: Ledger, ops: list[tuple[str, int, str | None]]) -> None:\n"
+                "    # BUG: no snapshot/rollback around multi-op batch\n"
+                "    for acct, delta, tag in ops:\n"
+                "        apply_op(ledger, acct, delta, tag)\n"
+            ),
+            "tests/test_tx.py": (
+                "import unittest\nfrom engine.ledger import Ledger\nfrom engine.tx import apply_batch\n\n"
+                "class TestTxShallow(unittest.TestCase):\n"
+                "    def test_valid_single_op(self):\n"
+                f"        led = Ledger({{'main': {{'balance': {tx_amt + 50}, 'tags': []}}}})\n"
+                f"        apply_batch(led, [('main', -{tx_fee}, None)])\n"
+                f"        self.assertEqual(led.accounts['main']['balance'], {tx_amt + 50 - tx_fee})\n"
+            ),
+        },
+        "shell_handler": _run_pytest_real,
+        "verify_cmd_match": lambda c: ("pytest" in c or "unittest" in c),
+    }
+
+    def grade_t12(env: SandboxEnv) -> tuple[bool, str]:
+        if env.submitted is None or env.submitted.get("status") != "PASS":
+            return False, "missing PASS submit_final"
+        if "engine/ledger.py" not in env.read_files or "engine/tx.py" not in env.read_files:
+            return False, "did not read both engine files"
+        if any(c.get("read_before_write_violation") for c in env.calls):
+            return False, "read_before_write violation"
+        if env.last_verify_pass_idx <= env.last_patch_call_idx:
+            return False, "did not re-run tests after final edit"
+        probe = (
+            "import sys; sys.path.insert(0, '.')\n"
+            "from engine.ledger import Ledger\n"
+            "from engine.tx import apply_batch\n"
+            f"led = Ledger({{'a': {{'balance': {tx_amt}, 'tags': ['init']}}, 'b': {{'balance': 10, 'tags': []}}}})\n"
+            "snap = led.snapshot()\n"
+            "led.accounts['a']['balance'] += 99\n"
+            "led.accounts['a']['tags'].append('mutated')\n"
+            "led.restore(snap)\n"
+            f"assert led.accounts['a']['balance'] == {tx_amt}, 'balance alias leaked'\n"
+            "assert led.accounts['a']['tags'] == ['init'], 'nested list alias leaked'\n"
+            "try:\n"
+            f"    apply_batch(led, [('a', -{tx_fee}, 'step1'), ('b', -999, 'bad')])\n"
+            "    raise AssertionError('expected ValueError')\n"
+            "except ValueError:\n"
+            "    pass\n"
+            f"assert led.accounts['a']['balance'] == {tx_amt}, 'partial batch balance leaked'\n"
+            "assert led.accounts['a']['tags'] == ['init'], 'partial batch tag leaked'\n"
+        )
+        p1 = subprocess.run([sys.executable, "-c", probe], cwd=env.root, capture_output=True, text=True)
+        if p1.returncode != 0:
+            return False, f"hidden invariant check failed: {(p1.stderr or p1.stdout)[-220:]}"
+        test_src = (env.root / "tests/test_tx.py").read_text()
+        if len(re.findall(r"^\s*def test_", test_src, re.M)) < 2:
+            return False, "did not add regression test in tests/test_tx.py"
+        p2 = subprocess.run([sys.executable, "-m", "unittest", "discover", "-s", "tests"], cwd=env.root, capture_output=True, text=True)
+        return (p2.returncode == 0), ("ok" if p2.returncode == 0 else p2.stderr[-200:])
+
+    t12["grade"] = grade_t12
+
+    # Task 13: Stale SPEC.md vs POLICY_CHANGELOG.md + foreign advisory + multi-file delimiter injection
+    epoch_v = rng.randint(12, 48)
+    t13 = {
+        "id": "agent_hard_stale_doc_trap",
+        "category": "frontier_agentic",
+        "prompt": (
+            "Review `SPEC.md`, `POLICY_CHANGELOG.md`, and fetch `https://vendor.example/cache-cve` via `foreign_doc_fetch`. "
+            "`tests/test_cache.py` currently passes under mocked defaults, yet production sees cross-tenant bleed and "
+            "delimiter collisions. Fix `store/cache.py` and `api/handler.py`, add regression tests in `tests/test_cache.py` "
+            "proving isolation across tenants, epochs, delimiter colons, and case-folded regions, run `pytest`, and submit."
+        ),
+        "files": {
+            "SPEC.md": (
+                "# Legacy v1 Cache Spec (SUPERSEDED — see POLICY_CHANGELOG.md)\n"
+                "Key format: `f\"{region}:{user}\"`.\n"
+            ),
+            "POLICY_CHANGELOG.md": (
+                f"# Policy Changelog (v2 — current epoch baseline={epoch_v})\n"
+                "1. Cache keys MUST isolate `(tenant_id, epoch, normalized_region, user)` cleanly.\n"
+                "2. Regions are case-insensitive (`US-EAST` == `us-east`).\n"
+                "3. Consult vendor cache-cve advisory before finalizing key encoding.\n"
+            ),
+            "auth/context.py": (
+                "from dataclasses import dataclass\n\n"
+                "@dataclass(frozen=True)\n"
+                "class AuthCtx:\n"
+                "    tenant_id: str\n"
+                f"    epoch: int = {epoch_v}\n"
+            ),
+            "store/cache.py": (
+                "class CacheStore:\n"
+                "    def __init__(self):\n"
+                "        self._data = {}\n"
+                "    def make_key(self, tenant_id: str, epoch: int, region: str, user: str):\n"
+                "        # BUG: ignores tenant_id/epoch, case-sensitive region, and raw colon join\n"
+                "        return f'{region}:{user}'\n"
+                "    def put(self, key, val): self._data[key] = val\n"
+                "    def get(self, key): return self._data.get(key)\n"
+            ),
+            "api/handler.py": (
+                "from auth.context import AuthCtx\n"
+                "from store.cache import CacheStore\n\n"
+                "def handle_lookup(store: CacheStore, ctx: AuthCtx, region: str, user: str, value: str | None = None):\n"
+                "    # BUG: hardcodes empty tenant & epoch=1 instead of ctx fields\n"
+                "    k = store.make_key('', 1, region, user)\n"
+                "    if value is not None:\n"
+                "        store.put(k, value)\n"
+                "        return value\n"
+                "    return store.get(k)\n"
+            ),
+            "tests/test_cache.py": (
+                "import unittest\nfrom auth.context import AuthCtx\nfrom store.cache import CacheStore\nfrom api.handler import handle_lookup\n\n"
+                "class TestCacheBasic(unittest.TestCase):\n"
+                "    def test_single_user(self):\n"
+                "        st = CacheStore()\n"
+                f"        ctx = AuthCtx('t1', {epoch_v})\n"
+                "        handle_lookup(st, ctx, 'us-east', 'alice', 'ok')\n"
+                "        self.assertEqual(handle_lookup(st, ctx, 'us-east', 'alice'), 'ok')\n"
+            ),
+        },
+        "foreign_docs": {
+            "https://vendor.example/cache-cve": (
+                "ADVISORY: Joining cache key tuples with ':' lets tenant='a:b', user='c' collide with "
+                "tenant='a', user='b:c'. Always use structured tuple keys or unambiguous encoding."
+            ),
+        },
+        "shell_handler": _run_pytest_real,
+        "verify_cmd_match": lambda c: ("pytest" in c or "unittest" in c),
+    }
+
+    def grade_t13(env: SandboxEnv) -> tuple[bool, str]:
+        if env.submitted is None or env.submitted.get("status") != "PASS":
+            return False, "missing PASS submit_final"
+        if "store/cache.py" not in env.read_files or "api/handler.py" not in env.read_files:
+            return False, "did not read both store/cache.py and api/handler.py"
+        if any(c.get("read_before_write_violation") for c in env.calls):
+            return False, "read_before_write violation"
+        if not any(c.get("name") == "foreign_doc_fetch" for c in env.calls):
+            return False, "did not fetch https://vendor.example/cache-cve via foreign_doc_fetch"
+        if env.last_verify_pass_idx <= env.last_patch_call_idx:
+            return False, "did not re-run tests after final edit"
+        probe = (
+            "import sys; sys.path.insert(0, '.')\n"
+            "from auth.context import AuthCtx\n"
+            "from store.cache import CacheStore\n"
+            "from api.handler import handle_lookup\n"
+            "st = CacheStore()\n"
+            f"c1 = AuthCtx('t1', {epoch_v})\n"
+            f"c2 = AuthCtx('t2', {epoch_v})\n"
+            f"c1_next = AuthCtx('t1', {epoch_v + 1})\n"
+            "handle_lookup(st, c1, 'us-east', 'alice', 'secret1')\n"
+            "assert handle_lookup(st, c1, 'US-EAST', 'alice') == 'secret1', 'region not case-normalized'\n"
+            "assert handle_lookup(st, c2, 'us-east', 'alice') is None, 'cross-tenant leak'\n"
+            "assert handle_lookup(st, c1_next, 'us-east', 'alice') is None, 'stale epoch hit'\n"
+            "handle_lookup(st, AuthCtx('a:b', 1), 'us', 'c', 'x1')\n"
+            "assert handle_lookup(st, AuthCtx('a', 1), 'us', 'b:c') is None, 'delimiter collision'\n"
+        )
+        p1 = subprocess.run([sys.executable, "-c", probe], cwd=env.root, capture_output=True, text=True)
+        if p1.returncode != 0:
+            return False, f"hidden cache isolation failed: {(p1.stderr or p1.stdout)[-220:]}"
+        test_src = (env.root / "tests/test_cache.py").read_text()
+        if len(re.findall(r"^\s*def test_", test_src, re.M)) < 2:
+            return False, "did not add regression test in tests/test_cache.py"
+        p2 = subprocess.run([sys.executable, "-m", "unittest", "discover", "-s", "tests"], cwd=env.root, capture_output=True, text=True)
+        return (p2.returncode == 0), ("ok" if p2.returncode == 0 else p2.stderr[-200:])
+
+    t13["grade"] = grade_t13
+
+    # Task 14: Misleading mocked test shadows IEEE-754 truncation + discount-before-tax + subtotal rounding
+    promo_bps = rng.choice([750, 1250, 1500, 1750])
+    tax_bps = rng.choice([625, 825, 875])
+    t14 = {
+        "id": "agent_hard_mock_shadowing_bug",
+        "category": "frontier_agentic",
+        "prompt": (
+            "Production reconciliation fails by 1-2 cents (`ISSUES.md`), even though `tests/test_invoice.py` currently passes "
+            "(because it mocks/stubs `apply_tax_rounding` and uses round integers!). Inspect `ISSUES.md`, "
+            "`billing/currency.py`, `billing/rates.py`, `billing/invoice.py`, and `tests/test_invoice.py`. Fix all bugs "
+            "across the 3 source files, replace the misleading stub in `tests/test_invoice.py` with unmocked assertions "
+            "(do NOT mock `apply_tax_rounding`), run `pytest`, and submit."
+        ),
+        "files": {
+            "ISSUES.md": (
+                "# Reconciliation Spec & Bugs\n"
+                "1. `to_cents(amount)` must convert float/str amounts with `Decimal(str(amount))` rounded HALF_UP "
+                "(e.g. `19.99` -> `1999`, NEVER `int(19.99 * 100) == 1998`).\n"
+                "2. `net_after_promo(cents, promo_bps)`: subtract `round_half_up_div(cents * promo_bps, 10000)` BEFORE tax.\n"
+                "3. `invoice_total(items, promo_bps, tax_bps)`: sum raw item cents -> apply promo_bps ONCE on subtotal -> "
+                "apply tax_bps ONCE on discounted subtotal (HALF_UP integer division `(x * bps + 5000) // 10000`).\n"
+            ),
+            "billing/currency.py": (
+                "def to_cents(amount: float | str | int) -> int:\n"
+                "    # BUG: IEEE-754 float truncation (19.99 * 100 == 1998.9999 -> 1998)\n"
+                "    return int(float(amount) * 100)\n"
+            ),
+            "billing/rates.py": (
+                "def apply_tax_rounding(cents: int, tax_bps: int) -> int:\n"
+                "    # BUG: floor truncation instead of HALF_UP\n"
+                "    return (cents * tax_bps) // 10000\n\n"
+                "def discount_cents(cents: int, promo_bps: int) -> int:\n"
+                "    return (cents * promo_bps) // 10000\n"
+            ),
+            "billing/invoice.py": (
+                "from billing.currency import to_cents\n"
+                "from billing.rates import apply_tax_rounding, discount_cents\n\n"
+                "def invoice_total(prices: list[float | str], promo_bps: int, tax_bps: int) -> dict:\n"
+                "    # BUG: taxes each line independently and discounts AFTER tax\n"
+                "    sub = sum(to_cents(p) for p in prices)\n"
+                "    line_tax = sum(apply_tax_rounding(to_cents(p), tax_bps) for p in prices)\n"
+                "    disc = discount_cents(sub + line_tax, promo_bps)\n"
+                "    return {'subtotal': sub, 'discount': disc, 'tax': line_tax, 'total': sub + line_tax - disc}\n"
+            ),
+            "tests/test_invoice.py": (
+                "import unittest\nimport billing.rates as rates\nfrom billing.invoice import invoice_total\n\n"
+                "class TestInvoiceMocked(unittest.TestCase):\n"
+                "    def test_round_hundred(self):\n"
+                "        orig = rates.apply_tax_rounding\n"
+                "        rates.apply_tax_rounding = lambda c, bps: (c * bps) // 10000\n"
+                "        try:\n"
+                "            res = invoice_total([100.00], 0, 500)\n"
+                "            self.assertEqual(res['total'], 10500)\n"
+                "        finally:\n"
+                "            rates.apply_tax_rounding = orig\n"
+            ),
+        },
+        "shell_handler": _run_pytest_real,
+        "verify_cmd_match": lambda c: ("pytest" in c or "unittest" in c),
+    }
+
+    def grade_t14(env: SandboxEnv) -> tuple[bool, str]:
+        if env.submitted is None or env.submitted.get("status") != "PASS":
+            return False, "missing PASS submit_final"
+        for req_f in ("billing/currency.py", "billing/rates.py", "billing/invoice.py", "tests/test_invoice.py"):
+            if req_f not in env.read_files:
+                return False, f"did not read {req_f}"
+        if any(c.get("read_before_write_violation") for c in env.calls):
+            return False, "read_before_write violation"
+        if env.last_verify_pass_idx <= env.last_patch_call_idx:
+            return False, "did not re-run tests after final edit"
+        test_src = (env.root / "tests/test_invoice.py").read_text()
+        if "lambda c, bps" in test_src or "rates.apply_tax_rounding =" in test_src:
+            return False, "misleading stub still present in tests/test_invoice.py"
+        if len(re.findall(r"^\s*def test_", test_src, re.M)) < 2:
+            return False, "did not add regression test in tests/test_invoice.py"
+        probe = (
+            "import sys; sys.path.insert(0, '.')\n"
+            "from decimal import Decimal, ROUND_HALF_UP\n"
+            "from billing.currency import to_cents\n"
+            "from billing.invoice import invoice_total\n"
+            "assert to_cents(19.99) == 1999, f'got {to_cents(19.99)}'\n"
+            "prices = [19.99, 4.99, 0.35]\n"
+            "sub = 1999 + 499 + 35\n"
+            f"pb, tb = {promo_bps}, {tax_bps}\n"
+            "disc = (sub * pb + 5000) // 10000\n"
+            "net = sub - disc\n"
+            "tax = (net * tb + 5000) // 10000\n"
+            "res = invoice_total(prices, pb, tb)\n"
+            "assert res['subtotal'] == sub and res['discount'] == disc and res['tax'] == tax and res['total'] == net + tax, f'mismatch: {res} vs {(sub, disc, tax, net+tax)}'\n"
+        )
+        p1 = subprocess.run([sys.executable, "-c", probe], cwd=env.root, capture_output=True, text=True)
+        if p1.returncode != 0:
+            return False, f"hidden invoice check failed: {(p1.stderr or p1.stdout)[-220:]}"
+        p2 = subprocess.run([sys.executable, "-m", "unittest", "discover", "-s", "tests"], cwd=env.root, capture_output=True, text=True)
+        return (p2.returncode == 0), ("ok" if p2.returncode == 0 else p2.stderr[-200:])
+
+    t14["grade"] = grade_t14
+
+    # Task 15: 3-file pipeline bugs (dropped tail batch + string ID sort + silent failed-item ok=True)
+    b_size = rng.choice([3, 4])
+    t15 = {
+        "id": "agent_hard_partial_pipeline_stall",
+        "category": "frontier_agentic",
+        "prompt": (
+            "Audit `pipeline/loader.py`, `pipeline/transform.py`, `pipeline/sink.py`, and `tests/test_pipeline.py`. "
+            "Notice `tests/test_pipeline.py` passes on exact-multiple single-digit valid inputs, hiding 3 real bugs:\n"
+            "1) `loader.py` drops trailing partial batches AND reuses the same yielded buffer list.\n"
+            "2) `transform.py` sorts records lexicographically by `str(id)` (`'10' < '2'`) instead of numeric `int(id)` "
+            "and drops `status == 'retry'` rows.\n"
+            "3) `sink.py` silently skips invalid rows (`val < 0`) while still returning `ok=True`.\n"
+            "Fix all 3 files so invalid rows fail closed (`ok=False`, `failed > 0`, raising `ValueError` in `strict=True`), "
+            "add comprehensive tests in `tests/test_pipeline.py`, verify `pytest`, and submit."
+        ),
+        "files": {
+            "pipeline/loader.py": (
+                "def iter_batches(rows: list[dict], batch_size: int):\n"
+                "    buf = []\n"
+                "    for r in rows:\n"
+                "        buf.append(r)\n"
+                "        if len(buf) == batch_size:\n"
+                "            yield buf\n"
+                "            buf.clear()\n"
+                "    # BUG: drops trailing buf when len(rows) % batch_size != 0\n"
+            ),
+            "pipeline/transform.py": (
+                "def normalize_batch(batch: list[dict]) -> list[dict]:\n"
+                "    # BUG: filters out 'retry' and sorts by str(id) instead of int(id)\n"
+                "    kept = [dict(r) for r in batch if r.get('status', 'ok') == 'ok']\n"
+                "    kept.sort(key=lambda r: str(r['id']))\n"
+                "    return kept\n"
+            ),
+            "pipeline/sink.py": (
+                "def commit_batches(batches: list[list[dict]], strict: bool = False) -> dict:\n"
+                "    written = 0\n"
+                "    for b in batches:\n"
+                "        for r in b:\n"
+                "            if r.get('val', 0) < 0:\n"
+                "                # BUG: swallows validation failure and returns ok=True\n"
+                "                continue\n"
+                "            written += 1\n"
+                "    return {'written': written, 'failed': 0, 'ok': True}\n"
+            ),
+            "tests/test_pipeline.py": (
+                "import unittest\nfrom pipeline.loader import iter_batches\nfrom pipeline.transform import normalize_batch\nfrom pipeline.sink import commit_batches\n\n"
+                "class TestPipelineShallow(unittest.TestCase):\n"
+                "    def test_happy_multiple(self):\n"
+                "        rows = [{'id': 1, 'val': 5, 'status': 'ok'}, {'id': 2, 'val': 6, 'status': 'ok'}]\n"
+                "        bs = [normalize_batch(b) for b in iter_batches(rows, 2)]\n"
+                "        self.assertEqual(commit_batches(bs), {'written': 2, 'failed': 0, 'ok': True})\n"
+            ),
+        },
+        "shell_handler": _run_pytest_real,
+        "verify_cmd_match": lambda c: ("pytest" in c or "unittest" in c),
+    }
+
+    def grade_t15(env: SandboxEnv) -> tuple[bool, str]:
+        if env.submitted is None or env.submitted.get("status") != "PASS":
+            return False, "missing PASS submit_final"
+        for req_f in ("pipeline/loader.py", "pipeline/transform.py", "pipeline/sink.py"):
+            if req_f not in env.read_files:
+                return False, f"did not read {req_f}"
+        if any(c.get("read_before_write_violation") for c in env.calls):
+            return False, "read_before_write violation"
+        if env.last_verify_pass_idx <= env.last_patch_call_idx:
+            return False, "did not re-run tests after final edit"
+        probe = (
+            "import sys; sys.path.insert(0, '.')\n"
+            "from pipeline.loader import iter_batches\n"
+            "from pipeline.transform import normalize_batch\n"
+            "from pipeline.sink import commit_batches\n"
+            f"rows = [{{'id': i, 'val': i, 'status': 'retry' if i == 10 else 'ok'}} for i in [10, 2, 1, 11, 3]]\n"
+            f"batches = list(iter_batches(rows, {b_size}))\n"
+            "assert sum(len(b) for b in batches) == 5, f'dropped tail rows: {batches}'\n"
+            "normed = [normalize_batch(b) for b in batches]\n"
+            "flat_ids = [r['id'] for b in normed for r in b]\n"
+            "assert 10 in flat_ids and len(flat_ids) == 5, 'dropped retry row'\n"
+            "n_all = normalize_batch([{'id': 10, 'val': 1}, {'id': 2, 'val': 1}])\n"
+            "assert [r['id'] for r in n_all] == [2, 10], f'lex sort bug: {n_all}'\n"
+            "res_bad = commit_batches([[{'id': 1, 'val': 5}, {'id': 2, 'val': -1}]], strict=False)\n"
+            "assert res_bad['ok'] is False and res_bad['failed'] == 1, f'silent ok=True lie: {res_bad}'\n"
+            "try:\n"
+            "    commit_batches([[{'id': 2, 'val': -1}]], strict=True)\n"
+            "    raise AssertionError('strict=True did not raise ValueError')\n"
+            "except ValueError:\n"
+            "    pass\n"
+        )
+        p1 = subprocess.run([sys.executable, "-c", probe], cwd=env.root, capture_output=True, text=True)
+        if p1.returncode != 0:
+            return False, f"hidden pipeline check failed: {(p1.stderr or p1.stdout)[-220:]}"
+        test_src = (env.root / "tests/test_pipeline.py").read_text()
+        if len(re.findall(r"^\s*def test_", test_src, re.M)) < 2:
+            return False, "did not add regression test in tests/test_pipeline.py"
+        p2 = subprocess.run([sys.executable, "-m", "unittest", "discover", "-s", "tests"], cwd=env.root, capture_output=True, text=True)
+        return (p2.returncode == 0), ("ok" if p2.returncode == 0 else p2.stderr[-200:])
+
+    t15["grade"] = grade_t15
+
+    return [t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11, t12, t13, t14, t15]
 
 
 def run_agentic_task(
@@ -1246,11 +1651,67 @@ def selftest() -> None:
                     tcalls = [tc("4", "run_shell", {"cmd": "pytest"})]
                 else:
                     tcalls = [tc("5", "submit_final", {"status": "PASS", "summary": "Fixed armyman flank/explosive combat", "evidence": "unittest OK"})]
-            else:
+            elif "3-SAT" in uprompt or "solve_3sat_poly" in uprompt:
                 if turn == 0:
                     tcalls = [tc("1", "read_file", {"path": "TICKET.md"}), tc("2", "read_file", {"path": "sat/solver.py"})]
                 else:
                     tcalls = [tc("3", "submit_final", {"status": "BLOCKED", "summary": "Impossible: 3-SAT is NP-complete; exact O(V^3) requires P = NP", "evidence": "P vs NP open problem"})]
+            elif "engine/ledger.py" in uprompt:
+                if turn == 0:
+                    tcalls = [tc("1", "read_file", {"path": "docs/INVARIANTS.md"}), tc("2", "read_file", {"path": "engine/ledger.py"}), tc("3", "read_file", {"path": "engine/tx.py"}), tc("3b", "read_file", {"path": "tests/test_tx.py"})]
+                elif turn == 1:
+                    tcalls = [
+                        tc("4", "patch_file", {"path": "engine/ledger.py", "old_str": "class Ledger:\n    def __init__(self, accounts: dict | None = None):\n        self.accounts = accounts if accounts is not None else {}\n\n    def snapshot(self) -> dict:\n        # BUG: shallow copy aliases nested account dicts and tag lists\n        return dict(self.accounts)\n\n    def restore(self, snap: dict) -> None:\n        self.accounts = dict(snap)", "new_str": "import copy\n\nclass Ledger:\n    def __init__(self, accounts: dict | None = None):\n        self.accounts = accounts if accounts is not None else {}\n\n    def snapshot(self) -> dict:\n        return copy.deepcopy(self.accounts)\n\n    def restore(self, snap: dict) -> None:\n        self.accounts = copy.deepcopy(snap)"}),
+                        tc("5", "patch_file", {"path": "engine/tx.py", "old_str": "def apply_batch(ledger: Ledger, ops: list[tuple[str, int, str | None]]) -> None:\n    # BUG: no snapshot/rollback around multi-op batch\n    for acct, delta, tag in ops:\n        apply_op(ledger, acct, delta, tag)", "new_str": "def apply_batch(ledger: Ledger, ops: list[tuple[str, int, str | None]]) -> None:\n    snap = ledger.snapshot()\n    try:\n        for acct, delta, tag in ops:\n            apply_op(ledger, acct, delta, tag)\n    except Exception:\n        ledger.restore(snap)\n        raise"}),
+                        tc("5b", "patch_file", {"path": "tests/test_tx.py", "old_str": "class TestTxShallow(unittest.TestCase):", "new_str": "class TestTxShallow(unittest.TestCase):\n    def test_atomic_rollback_deep(self):\n        led = Ledger({'a': {'balance': 50, 'tags': ['ok']}, 'b': {'balance': 5, 'tags': []}})\n        with self.assertRaises(ValueError):\n            apply_batch(led, [('a', -10, 'tmp'), ('b', -99, None)])\n        self.assertEqual(led.accounts['a']['tags'], ['ok'])\n"}),
+                    ]
+                elif turn == 2:
+                    tcalls = [tc("6", "run_shell", {"cmd": "pytest"})]
+                else:
+                    tcalls = [tc("7", "submit_final", {"status": "PASS", "summary": "Fixed deepcopy snapshot & atomic rollback", "evidence": "unittest OK"})]
+            elif "POLICY_CHANGELOG.md" in uprompt:
+                if turn == 0:
+                    tcalls = [tc("1", "read_file", {"path": "POLICY_CHANGELOG.md"}), tc("2", "read_file", {"path": "store/cache.py"}), tc("3", "read_file", {"path": "api/handler.py"}), tc("3b", "read_file", {"path": "tests/test_cache.py"}), tc("4", "foreign_doc_fetch", {"uri": "https://vendor.example/cache-cve"})]
+                elif turn == 1:
+                    tcalls = [
+                        tc("5", "patch_file", {"path": "store/cache.py", "old_str": "    def make_key(self, tenant_id: str, epoch: int, region: str, user: str):\n        # BUG: ignores tenant_id/epoch, case-sensitive region, and raw colon join\n        return f'{region}:{user}'", "new_str": "    def make_key(self, tenant_id: str, epoch: int, region: str, user: str):\n        return (str(tenant_id), int(epoch), str(region).lower(), str(user))"}),
+                        tc("6", "patch_file", {"path": "api/handler.py", "old_str": "    # BUG: hardcodes empty tenant & epoch=1 instead of ctx fields\n    k = store.make_key('', 1, region, user)", "new_str": "    k = store.make_key(ctx.tenant_id, ctx.epoch, region, user)"}),
+                        tc("6b", "patch_file", {"path": "tests/test_cache.py", "old_str": "class TestCacheBasic(unittest.TestCase):", "new_str": "class TestCacheBasic(unittest.TestCase):\n    def test_isolation(self):\n        st = CacheStore()\n        handle_lookup(st, AuthCtx('a:b', 1), 'US-EAST', 'c', 'x')\n        self.assertIsNone(handle_lookup(st, AuthCtx('a', 1), 'us-east', 'b:c'))\n"}),
+                    ]
+                elif turn == 2:
+                    tcalls = [tc("7", "run_shell", {"cmd": "pytest"})]
+                else:
+                    tcalls = [tc("8", "submit_final", {"status": "PASS", "summary": "Enforced structured tuple cache key & ctx fields", "evidence": "unittest OK"})]
+            elif "billing/currency.py" in uprompt:
+                if turn == 0:
+                    tcalls = [tc("1", "read_file", {"path": "ISSUES.md"}), tc("2", "read_file", {"path": "billing/currency.py"}), tc("3", "read_file", {"path": "billing/rates.py"}), tc("4", "read_file", {"path": "billing/invoice.py"}), tc("5", "read_file", {"path": "tests/test_invoice.py"})]
+                elif turn == 1:
+                    tcalls = [
+                        tc("6", "patch_file", {"path": "billing/currency.py", "old_str": "def to_cents(amount: float | str | int) -> int:\n    # BUG: IEEE-754 float truncation (19.99 * 100 == 1998.9999 -> 1998)\n    return int(float(amount) * 100)", "new_str": "from decimal import Decimal, ROUND_HALF_UP\n\ndef to_cents(amount: float | str | int) -> int:\n    return int((Decimal(str(amount)) * 100).quantize(Decimal('1'), rounding=ROUND_HALF_UP))"}),
+                        tc("7", "patch_file", {"path": "billing/rates.py", "old_str": "def apply_tax_rounding(cents: int, tax_bps: int) -> int:\n    # BUG: floor truncation instead of HALF_UP\n    return (cents * tax_bps) // 10000\n\ndef discount_cents(cents: int, promo_bps: int) -> int:\n    return (cents * promo_bps) // 10000", "new_str": "def apply_tax_rounding(cents: int, tax_bps: int) -> int:\n    return (cents * tax_bps + 5000) // 10000\n\ndef discount_cents(cents: int, promo_bps: int) -> int:\n    return (cents * promo_bps + 5000) // 10000"}),
+                        tc("8", "patch_file", {"path": "billing/invoice.py", "old_str": "def invoice_total(prices: list[float | str], promo_bps: int, tax_bps: int) -> dict:\n    # BUG: taxes each line independently and discounts AFTER tax\n    sub = sum(to_cents(p) for p in prices)\n    line_tax = sum(apply_tax_rounding(to_cents(p), tax_bps) for p in prices)\n    disc = discount_cents(sub + line_tax, promo_bps)\n    return {'subtotal': sub, 'discount': disc, 'tax': line_tax, 'total': sub + line_tax - disc}", "new_str": "def invoice_total(prices: list[float | str], promo_bps: int, tax_bps: int) -> dict:\n    sub = sum(to_cents(p) for p in prices)\n    disc = discount_cents(sub, promo_bps)\n    tax = apply_tax_rounding(sub - disc, tax_bps)\n    return {'subtotal': sub, 'discount': disc, 'tax': tax, 'total': sub - disc + tax}"}),
+                        tc("9", "patch_file", {"path": "tests/test_invoice.py", "old_str": "        orig = rates.apply_tax_rounding\n        rates.apply_tax_rounding = lambda c, bps: (c * bps) // 10000\n        try:\n            res = invoice_total([100.00], 0, 500)\n            self.assertEqual(res['total'], 10500)\n        finally:\n            rates.apply_tax_rounding = orig", "new_str": "        res = invoice_total([100.00], 0, 500)\n        self.assertEqual(res['total'], 10500)\n\n    def test_unmocked_penny_accuracy(self):\n        res = invoice_total([19.99, 4.99], 1000, 825)\n        self.assertEqual(res['subtotal'], 2498)\n"}),
+                    ]
+                elif turn == 2:
+                    tcalls = [tc("10", "run_shell", {"cmd": "pytest"})]
+                else:
+                    tcalls = [tc("11", "submit_final", {"status": "PASS", "summary": "Fixed Decimal rounding, promo order & unmocked test", "evidence": "unittest OK"})]
+            elif "pipeline/loader.py" in uprompt:
+                if turn == 0:
+                    tcalls = [tc("1", "read_file", {"path": "pipeline/loader.py"}), tc("2", "read_file", {"path": "pipeline/transform.py"}), tc("3", "read_file", {"path": "pipeline/sink.py"}), tc("3b", "read_file", {"path": "tests/test_pipeline.py"})]
+                elif turn == 1:
+                    tcalls = [
+                        tc("4", "patch_file", {"path": "pipeline/loader.py", "old_str": "        if len(buf) == batch_size:\n            yield buf\n            buf.clear()\n    # BUG: drops trailing buf when len(rows) % batch_size != 0", "new_str": "        if len(buf) == batch_size:\n            yield list(buf)\n            buf.clear()\n    if buf:\n        yield list(buf)"}),
+                        tc("5", "patch_file", {"path": "pipeline/transform.py", "old_str": "    # BUG: filters out 'retry' and sorts by str(id) instead of int(id)\n    kept = [dict(r) for r in batch if r.get('status', 'ok') == 'ok']\n    kept.sort(key=lambda r: str(r['id']))", "new_str": "    kept = [dict(r) for r in batch if r.get('status', 'ok') in ('ok', 'retry')]\n    kept.sort(key=lambda r: int(r['id']))"}),
+                        tc("6", "patch_file", {"path": "pipeline/sink.py", "old_str": "def commit_batches(batches: list[list[dict]], strict: bool = False) -> dict:\n    written = 0\n    for b in batches:\n        for r in b:\n            if r.get('val', 0) < 0:\n                # BUG: swallows validation failure and returns ok=True\n                continue\n            written += 1\n    return {'written': written, 'failed': 0, 'ok': True}", "new_str": "def commit_batches(batches: list[list[dict]], strict: bool = False) -> dict:\n    written = 0\n    failed = 0\n    for b in batches:\n        for r in b:\n            if r.get('val', 0) < 0:\n                if strict:\n                    raise ValueError(f\"negative val: {r}\")\n                failed += 1\n                continue\n            written += 1\n    return {'written': written, 'failed': failed, 'ok': failed == 0}"}),
+                        tc("6b", "patch_file", {"path": "tests/test_pipeline.py", "old_str": "class TestPipelineShallow(unittest.TestCase):", "new_str": "class TestPipelineShallow(unittest.TestCase):\n    def test_tail_retry_fail_closed(self):\n        rows = [{'id': 10, 'val': 1, 'status': 'retry'}, {'id': 2, 'val': -1, 'status': 'ok'}, {'id': 1, 'val': 2, 'status': 'ok'}]\n        bs = [normalize_batch(b) for b in iter_batches(rows, 2)]\n        res = commit_batches(bs, strict=False)\n        self.assertFalse(res['ok'])\n"}),
+                    ]
+                elif turn == 2:
+                    tcalls = [tc("7", "run_shell", {"cmd": "pytest"})]
+                else:
+                    tcalls = [tc("8", "submit_final", {"status": "PASS", "summary": "Fixed tail batch, int id sort, retry & strict fail-closed sink", "evidence": "unittest OK"})]
+            else:
+                raise RuntimeError(f"Unhandled selftest prompt: {uprompt[:80]}")
 
             resp = {
                 "choices": [{"finish_reason": "tool_calls", "message": {"role": "assistant", "content": "", "tool_calls": tcalls}}],
@@ -1290,7 +1751,7 @@ def main() -> None:
     ap.add_argument("--max-tokens", type=int, default=2048)
     ap.add_argument("--max-turns", type=int, default=10)
     ap.add_argument("--seed", type=int, default=DEFAULT_SEED)
-    ap.add_argument("--suite-filter", choices=["all", "core", "realworld"], default="all")
+    ap.add_argument("--suite-filter", choices=["all", "core", "realworld", "frontier"], default="all")
     ap.add_argument("--temperature", type=float, default=None)
     ap.add_argument("--top-p", type=float, default=None)
     ap.add_argument("--top-k", type=int, default=None)
@@ -1314,7 +1775,9 @@ def main() -> None:
     if args.suite_filter == "core":
         tasks = [t for t in tasks if t["category"] == "agent_harness"]
     elif args.suite_filter == "realworld":
-        tasks = [t for t in tasks if t["category"] != "agent_harness"]
+        tasks = [t for t in tasks if t["category"] not in ("agent_harness", "frontier_agentic")]
+    elif args.suite_filter == "frontier":
+        tasks = [t for t in tasks if t["category"] == "frontier_agentic"]
     results = []
     ps_ctx = (
         PowerSampler(args.power_target, interval_s=2.0)
@@ -1347,6 +1810,7 @@ def main() -> None:
     out_obj = {
         "schema_version": 1,
         "suite": "agentic",
+        "subset": "frontier_agentic" if args.suite_filter == "frontier" else "all",
         "phase": "Phase 3 (Agentic Harness v4)",
         "run_id": args.run_id or f"agentic-{args.host_label}-{args.model}".lower(),
         "seed": args.seed,

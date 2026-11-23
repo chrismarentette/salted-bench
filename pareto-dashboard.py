@@ -717,6 +717,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         tool_recovery:     { label: 'Tool Recovery',      short: 'Recovery' },
         two_turn_recovery: { label: '2-Turn Recovery',    short: 'Recovery' },
         agent_harness:     { label: 'Agent Harness',      short: 'Agentic' },
+        frontier_agentic:  { label: 'Frontier Agentic',   short: 'Front-Ag' },
       };
 
       const V1_TASK_IDS = new Set([
@@ -730,13 +731,25 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         'front_bilevel_dp','front_nonlocal_bijection_10','front_16k_rollback_audit','front_ood_affine_tx_taint',
       ]);
 
+      const AGENTIC_11_IDS = new Set([
+        'agent_read_patch_verify','agent_probe_honesty','agent_antiloop_pivot','agent_foreign_injection',
+        'agent_contract_drift','agent_clean_handoff','agent_rapidocal_fraction','agent_lsmtop_journal_metrics',
+        'agent_oxirack_ccol_bounds','agent_armyman_flank_combat','agent_impossible_p_vs_np',
+      ]);
+
+      const AGENTIC_FRONTIER_IDS = new Set([
+        'agent_hard_aliased_rollback','agent_hard_stale_doc_trap','agent_hard_mock_shadowing_bug','agent_hard_partial_pipeline_stall',
+      ]);
+
       const SUITE_GROUPS = [
-        { id: 'v3',          label: 'v3 (28 Tasks)',      desc: 'Full 28-task parity suite — identical prompt set across every model & rig' },
-        { id: 'v1',          label: 'v1 Core (16 Tasks)', desc: 'Core 16 tasks — native 16-task runs + matching 16-task slice from v3 runs' },
-        { id: 'frontier',    label: 'Frontier (4 Tasks)', desc: '4 hardest frontier_ceiling tasks — standalone subsets + matching 4-task slice from v3' },
-        { id: 'extended_v4', label: 'Extended v4 (6t)',   desc: 'Epistemic honesty, minimal unified diff & 2-turn self-correction recovery' },
-        { id: 'agentic',     label: 'Agentic (11t)',      desc: 'Multi-turn sandboxed repo tasks (read-before-write, anti-loop, P vs NP)' },
-        { id: 'combined',    label: 'All Suites (Avg)',   desc: 'Cross-suite macro-average per model config across independent suites completed' },
+        { id: 'v3',               label: 'v3 (28 Tasks)',      desc: 'Full 28-task parity suite — identical prompt set across every model & rig' },
+        { id: 'v1',               label: 'v1 Core (16 Tasks)', desc: 'Core 16 tasks — native 16-task runs + matching 16-task slice from v3 runs' },
+        { id: 'frontier',         label: 'Frontier (4 Tasks)', desc: '4 hardest frontier_ceiling tasks — standalone subsets + matching 4-task slice from v3' },
+        { id: 'extended_v4',      label: 'Extended v4 (6t)',   desc: 'Epistemic honesty, minimal unified diff & 2-turn self-correction recovery' },
+        { id: 'agentic',          label: 'Agentic (11t)',      desc: 'Multi-turn sandboxed repo tasks (11 baseline tasks — slices cleanly from 15t runs)' },
+        { id: 'agentic_frontier', label: 'Agentic Frontier (4t)', desc: '4 multi-file/misleading-test hard agentic tasks (tier=frontier style)' },
+        { id: 'agentic_full',     label: 'Agentic Full (15t)', desc: 'All 15 sandboxed agentic tasks combined (11 baseline + 4 frontier_agentic)' },
+        { id: 'combined',         label: 'All Suites (Avg)',   desc: 'Cross-suite macro-average per model config across independent suites completed' },
       ];
 
       function detectInitialGroup(runs) {
@@ -932,7 +945,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
         if (groupId === 'frontier') {
           return raw
-            .filter(r => r.subset === 'frontier' || (r.suite === 'v3' && (r.subset || 'all') === 'all'))
+            .filter(r => (r.subset === 'frontier' && r.suite !== 'agentic') || (r.suite === 'v3' && (r.subset || 'all') === 'all'))
             .map(r => (r.subset === 'frontier' ? { ...r, _sliceTag: 'subset' } : projectTaskSubset(r, FRONTIER_TASK_IDS, 'frontier', 'from v3')))
             .filter(Boolean);
         }
@@ -940,7 +953,19 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           return raw.filter(r => r.suite === 'extended_v4');
         }
         if (groupId === 'agentic') {
-          return raw.filter(r => r.suite === 'agentic');
+          return raw
+            .filter(r => r.suite === 'agentic' && (r.subset || 'all') === 'all')
+            .map(r => ((r.summary && r.summary.total_tasks === 11) ? r : projectTaskSubset(r, AGENTIC_11_IDS, 'agentic', '11t slice')))
+            .filter(Boolean);
+        }
+        if (groupId === 'agentic_frontier') {
+          return raw
+            .filter(r => r.suite === 'agentic' && (r.subset === 'frontier_agentic' || (r.tasks || []).some(t => AGENTIC_FRONTIER_IDS.has(t.id))))
+            .map(r => (r.subset === 'frontier_agentic' ? { ...r, _sliceTag: 'subset' } : projectTaskSubset(r, AGENTIC_FRONTIER_IDS, 'agentic_frontier', 'from 15t')))
+            .filter(Boolean);
+        }
+        if (groupId === 'agentic_full') {
+          return raw.filter(r => r.suite === 'agentic' && (r.subset || 'all') === 'all' && r.summary && r.summary.total_tasks >= 15);
         }
         if (groupId === 'combined') {
           return raw.filter(r => (r.subset || 'all') === 'all');
