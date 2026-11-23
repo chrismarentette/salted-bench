@@ -47,13 +47,18 @@ def detect_engine_info(raw: dict) -> tuple[str, str, str]:
     eng = (raw.get("engine") or "").lower()
     rid = (raw.get("run_id") or "").lower()
     bck = (raw.get("backend") or "").lower()
+    lv = raw.get("llama_version") or {}
+    lv_s = (lv.get("props_build_info") or lv.get("label") or "").lower()
+    combo = f"{eng} {lv_s}"
     if "strata" in eng or "unbiasedstrata" in eng or "strata" in rid:
         tag = "Strata-IK2" if ("ik2" in eng or "ik2" in rid) else "Strata"
         return "strata", "UnbiasedStrata", tag
-    if "b13610" in eng or "b1855" in eng or "llama-v2" in rid or "v2" in eng:
+    if "b13610" in combo or "b1855" in combo or "llama-v2" in rid or "v2" in eng:
         return "llama_v2", "llama.cpp v2", "llama-v2"
-    if "llama" in eng or "strix" in eng or "vulkan" in bck or "cuda" in bck:
-        return "llama", "llama.cpp", "llama"
+    if "b1070" in combo:
+        return "llama_b1070", "llama.cpp (b1070)", "b1070"
+    if "llama" in eng or "strix" in eng or "b1824" in combo or "b13603" in combo or "vulkan" in bck or "cuda" in bck:
+        return "llama", "llama.cpp (b1824/b13603)", "llama"
     return "other", (raw.get("engine") or raw.get("backend") or "Other"), "Other"
 
 
@@ -771,10 +776,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       };
 
       const ENGINE_META = {
-        strata:   { label: 'UnbiasedStrata', color: '#38bdf8', short: 'Strata' },
-        llama_v2: { label: 'llama.cpp v2',   color: '#f472b6', short: 'llama-v2' },
-        llama:    { label: 'llama.cpp',      color: '#a78bfa', short: 'llama' },
-        other:    { label: 'Other',          color: '#94a3b8', short: 'Other' },
+        strata:      { label: 'UnbiasedStrata',          color: '#38bdf8', short: 'Strata' },
+        llama_v2:    { label: 'llama.cpp v2',            color: '#f472b6', short: 'llama-v2' },
+        llama:       { label: 'llama.cpp (b1824/b13603)', color: '#a78bfa', short: 'llama' },
+        llama_b1070: { label: 'llama.cpp (b1070)',       color: '#94a3b8', short: 'b1070' },
+        other:       { label: 'Other',                   color: '#64748b', short: 'Other' },
       };
 
       function engineMetaOf(r) {
@@ -784,15 +790,21 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         const eng = String((r && r.engine) || '').toLowerCase();
         const rid = String((r && r.run_id) || '').toLowerCase();
         const bck = String((r && r.backend) || '').toLowerCase();
+        const lvObj = (r && r.llama_version) || {};
+        const lvs = String(lvObj.props_build_info || lvObj.label || '').toLowerCase();
+        const combo = `${eng} ${lvs}`;
         if (eng.includes('strata') || eng.includes('unbiasedstrata') || rid.includes('strata')) {
           const tag = (eng.includes('ik2') || rid.includes('ik2')) ? 'Strata-IK2' : 'Strata';
           return { key: 'strata', label: 'UnbiasedStrata', tag, color: ENGINE_META.strata.color };
         }
-        if (eng.includes('b13610') || eng.includes('b1855') || rid.includes('llama-v2') || eng.includes('v2')) {
+        if (combo.includes('b13610') || combo.includes('b1855') || rid.includes('llama-v2') || eng.includes('v2')) {
           return { key: 'llama_v2', label: 'llama.cpp v2', tag: 'llama-v2', color: ENGINE_META.llama_v2.color };
         }
-        if (eng.includes('llama') || eng.includes('strix') || bck.includes('vulkan') || bck.includes('cuda')) {
-          return { key: 'llama', label: 'llama.cpp', tag: 'llama', color: ENGINE_META.llama.color };
+        if (combo.includes('b1070')) {
+          return { key: 'llama_b1070', label: 'llama.cpp (b1070)', tag: 'b1070', color: ENGINE_META.llama_b1070.color };
+        }
+        if (eng.includes('llama') || eng.includes('strix') || combo.includes('b1824') || combo.includes('b13603') || bck.includes('vulkan') || bck.includes('cuda')) {
+          return { key: 'llama', label: 'llama.cpp (b1824/b13603)', tag: 'llama', color: ENGINE_META.llama.color };
         }
         return { key: 'other', label: (r && (r.engine || r.backend)) || 'Other', tag: 'Other', color: ENGINE_META.other.color };
       }
@@ -956,7 +968,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         const q = shortQuantTag(r.quant);
         const e = shortEffortTag(r.effort);
         const em = engineMetaOf(r);
-        const eng = (em.key === 'strata' || em.key === 'llama_v2') ? em.tag : '';
+        const eng = (em.key === 'strata' || em.key === 'llama_v2' || em.key === 'llama_b1070') ? em.tag : '';
         const cap = (r.max_tokens >= 16384 && !(r.effort || '').includes('16k')) ? '16k' : '';
         const sub = r._sliceTag === 'subset' ? 'sub' : '';
         return [base, q, e, eng, cap, sub].filter(Boolean).join(' ');
@@ -970,7 +982,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         const effStr = [r.effort && r.effort !== 'default' ? r.effort : '', capTag].filter(Boolean).join(' ');
         if (effStr) parts.push(`(${effStr})`);
         const em = engineMetaOf(r);
-        if (em.key === 'strata' || em.key === 'llama_v2') parts.push(`[${em.tag}]`);
+        if (em.key === 'strata' || em.key === 'llama_v2' || em.key === 'llama_b1070') parts.push(`[${em.tag}]`);
         if (r._sliceTag) parts.push(`[${r._sliceTag}]`);
         return parts.filter(Boolean).join(' ');
       }
@@ -1147,7 +1159,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           const totalWallS = pickedSuites.reduce((a, [, x]) => a + (x.summary.wall_total_s || 0), 0);
           const totalTok = pickedSuites.reduce((a, [, x]) => a + (x.summary.gen_tok_total || 0), 0);
           const em0 = engineMetaOf(r0);
-          const lblParts = [r0.model, r0.quant, r0.draft_model ? '+ Draft' : null, (r0.effort && r0.effort !== 'default') ? `(${r0.effort})` : null, (em0.key === 'strata' || em0.key === 'llama_v2') ? `[${em0.tag}]` : null].filter(Boolean);
+          const lblParts = [r0.model, r0.quant, r0.draft_model ? '+ Draft' : null, (r0.effort && r0.effort !== 'default') ? `(${r0.effort})` : null, (em0.key === 'strata' || em0.key === 'llama_v2' || em0.key === 'llama_b1070') ? `[${em0.tag}]` : null].filter(Boolean);
           const cats = {};
           pickedSuites.forEach(([, sr]) => {
             Object.entries(sr.categories || {}).forEach(([ck, cv]) => { cats[ck] = cv; });
@@ -1537,7 +1549,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         const engineScopeAll = runsInGroup(state.suiteGroup, false, true, false);
         const ef = document.getElementById('engine-filters');
         ef.innerHTML = '<span class="pills-label">Engines:</span>';
-        const engOrder = ['strata', 'llama_v2', 'llama', 'other'];
+        const engOrder = ['strata', 'llama_v2', 'llama', 'llama_b1070', 'other'];
         const presentEngs = Array.from(new Set(engineScopeAll.map(r => engineMetaOf(r).key)));
         presentEngs.sort((a, b) => (engOrder.indexOf(a) === -1 ? 99 : engOrder.indexOf(a)) - (engOrder.indexOf(b) === -1 ? 99 : engOrder.indexOf(b)));
         presentEngs.forEach(ek => {
@@ -2007,7 +2019,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             const badge = frontIds.has(r.run_id) ? '<span class="badge-win">Pareto</span>' : '';
             const draftStr = s.draft_total ? ` (${s.draft_accept_pct}% draft)` : '';
             const mw = meanWall(s);
-            const lv = r.llama_version && (r.llama_version.props_build_info || r.llama_version.label);
+            const emS = engineMetaOf(r);
+            const lv = emS.key === 'strata' ? (r.engine || emS.label) : (r.llama_version && (r.llama_version.props_build_info || r.llama_version.label));
             const pwr = r.power_telemetry && r.power_telemetry.available ? `${r.power_telemetry.system_avg_w}W · ${r.power_telemetry.system_wh}Wh` : '';
             const subMeta = [r.host_label, r.backend, lv, pwr].filter(Boolean).join(' · ');
             return `<tr data-sb-idx="${idx}" style="cursor:pointer;">
@@ -2049,7 +2062,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
               <span class="tt-k">Prefill / Decode</span><span class="tt-v">${s.pp_tps_median ?? '—'} / ${s.tg_tps_median ?? '—'} t/s</span>
               <span class="tt-k">Draft Accept</span><span class="tt-v">${s.draft_total ? s.draft_accept_pct + '% (' + s.draft_accepted + '/' + s.draft_total + ')' : '—'}</span>
               <span class="tt-k">Memory</span><span class="tt-v">${esc(p.mem_label || '—')}</span>
-              <span class="tt-k">Build / Power</span><span class="tt-v">${esc((p.llama_version && (p.llama_version.props_build_info || p.llama_version.label)) || '—')} · ${p.power_telemetry && p.power_telemetry.available ? `${p.power_telemetry.system_avg_w}W (${p.power_telemetry.system_wh}Wh)` : '—'}</span>
+              <span class="tt-k">Build / Power</span><span class="tt-v">${esc((engineMetaOf(p).key === 'strata' ? p.engine : (p.llama_version && (p.llama_version.props_build_info || p.llama_version.label))) || '—')} · ${p.power_telemetry && p.power_telemetry.available ? `${p.power_telemetry.system_avg_w}W (${p.power_telemetry.system_wh}Wh)` : '—'}</span>
               <span class="tt-k">Seed / Ctx</span><span class="tt-v">${p.seed} · ${p.ctx || '—'}</span>
             </div>
             <div class="tt-summary" style="border-left-color:${p.color}">${esc(summaryText)}</div>`;
@@ -2569,6 +2582,9 @@ def selftest() -> None:
         assert runs_anon[0]["host_label"] == "Rig A (8 GB CUDA)"
         assert runs_anon[0]["family_key"] == "inkling"
         assert runs_anon[0]["engine_key"] == "llama"
+        assert detect_engine_info({"engine": "llama-strix b1070+inkling"})[0] == "llama_b1070"
+        assert detect_engine_info({"engine": "UnbiasedStrata maya-ik2"})[:2] == ("strata", "UnbiasedStrata")
+        assert detect_engine_info({"engine": "custom-fork/strix-llama.cpp b13610"})[0] == "llama_v2"
         assert runs_anon[1]["suite"] == "agentic"
         assert runs_anon[1]["draft_model"] == "mtp"
         assert "agent_harness" in runs_anon[1]["categories"]
