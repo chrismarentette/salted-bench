@@ -16,6 +16,7 @@
 | `v3-Rig A-ink2-iq3xxs-low` | Rig A | Inkling-2-Mini-IQ3 | AD-IQ3_XXS | low | 16/16 (100.0%) | 26/28 (92.9%) | 1 | 37.34 | 66.62 | 69.21 | 1.039 | 2585.5 | 161.1 | 27.2 | 0.141 | — |
 | `v3-Rig B-ink2-udq4kxl-low-dspark-frontier` | Rig B | Inkling-2-Mini | UD-Q4_K_XL | low | — | 3/4 (75.0%) | 1 | 199.58 | 199.04 | 56.73 | 0.285 | 1596.6 | 465.7 | 29.7 | 0.116 | — |
 | `v3-Rig B-ink2-udq4kxl-low-dspark` | Rig B | Inkling-2-Mini | UD-Q4_K_XL | low | 16/16 (100.0%) | 27/28 (96.4%) | 1 | 34.02 | 67.66 | 77.64 | 1.148 | 874.8 | 430.7 | 33.0 | 0.142 | — |
+| `v3-Rig B-ink2-udq4kxl-med-dspark` | Rig B | Inkling-2-Mini | UD-Q4_K_XL | medium | 15/16 (93.8%) | 23/28 (82.1%) | 4 | 36.73 | 92.33 | 112.41 | 1.217 | 883.6 | 426.9 | 33.5 | 0.058 | 133.47W / 95.851Wh |
 | `v3-Rig B-qw38-27b-udq5kxl-low-mtp-frontier` | Rig B | Qwen3.8-27B | UD-Q5_K_XL | low | — | 2/4 (50.0%) | 2 | 234.39 | 236.26 | 50.32 | 0.213 | 1936.5 | 368.4 | 29.2 | 0.063 | — |
 | `v3-Rig B-qw38-27b-udq5kxl-low-mtp` | Rig B | Qwen3.8-27B | UD-Q5_K_XL | low | 15/16 (93.8%) | 25/28 (89.3%) | 2 | 46.12 | 69.8 | 76.74 | 1.099 | 1289.5 | 305.9 | 30.5 | 0.156 | — |
 | `v3-Rig B-qwen36-35b-q5km-frontier` | Rig B | Qwen3.6-35B-A3B | Q5_K_M | default | — | 0/4 (0.0%) | 4 | 148.37 | 156.72 | 17.37 | 0.111 | 388.3 | 1750.9 | 55.3 | 0.0 | — |
