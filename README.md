@@ -19,6 +19,12 @@ Zero-dependency, anti-contamination benchmark suite and static Pareto dashboard 
 - **`refusal-eval.py`**: Blind refusal & benign false-refusal evaluator (summary-only output, never logs raw prompts).
 - **`pareto-dashboard.py`**: Builds the standalone single-file HTML dashboard (`--anonymize` ON by default, filters `invalidated` runs cleanly).
 
+## Tier & Pruning Policy (`model-profiles.json`)
+- **`frontier`:** Full shakedown across card samplers, native reasoning levels, `16k` truncation recovery (`--retry-truncated-from`), and `salted-agentic.py`.
+- **`heavy`:** Canonical `v3` baseline + `16k` truncation recovery (`>= 3` truncations) + card sampler divergence check only.
+- **`small`:** Single canonical `v3` baseline at card defaults; zero parameter sweeps.
+- **`dominated`:** Historical baseline only — skip all future `16k`, sampler, reasoning-grid, or Agentic re-tests unless explicitly requested. A model is demoted here **only** when a `run_validity = valid`, `perf_floor`-verified run on an optimal engine/offload is strictly Pareto-dominated in both Pass@1 and wall/decode speed due to age, parameter size, or bandwidth (not suboptimal engine settings).
+
 ## Publishing Safely to GitHub Pages
 ```bash
 python3 scripts/publish.py
