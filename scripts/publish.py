@@ -5,7 +5,6 @@ from __future__ import annotations
 import getpass
 import os
 import re
-import shutil
 import socket
 import subprocess
 import sys
@@ -90,24 +89,21 @@ def main() -> int:
     if extra:
         os.environ["BENCH_REDACT_WORDS"] = ",".join(extra)
     runs_dir = ROOT / "runs"
-    dash_html = ROOT / "salted-pareto-dashboard.html"
     idx_html = ROOT / "index.html"
     curve_md = ROOT / "bench-ink-qw38-curve.md"
 
     if runs_dir.exists() and any(runs_dir.glob("*.json")):
         subprocess.run([
             sys.executable, str(ROOT / "pareto-dashboard.py"), str(runs_dir),
-            "--out", str(dash_html),
+            "--out", str(idx_html),
             "--title", "Salted Benchmark Pareto Frontier",
             "--subtitle", "Local Quantization & Hardware Topology Comparison (Anonymized)",
         ], check=True)
-        shutil.copyfile(dash_html, idx_html)
         subprocess.run([
             sys.executable, str(ROOT / "analyze_curve.py"),
             "--runs", str(runs_dir), "--out-md", str(curve_md),
         ], check=True)
 
-    check_html_js(dash_html)
     check_html_js(idx_html)
 
     failures: list[str] = []

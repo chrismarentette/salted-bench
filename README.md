@@ -23,4 +23,4 @@ Zero-dependency, anti-contamination benchmark suite and static Pareto dashboard 
 ```bash
 python3 scripts/publish.py
 ```
-`scripts/publish.py` rebuilds anonymized `salted-pareto-dashboard.html`, `index.html`, and `bench-ink-qw38-curve.md`, validates inline JS via `node --check`, and enforces a strict zero-PII/secret/IP leak scan before staging.
+`scripts/publish.py` rebuilds anonymized `index.html` and `bench-ink-qw38-curve.md`, validates inline JS via `node --check`, and enforces a strict zero-PII/secret/IP leak scan before staging.
