@@ -1,9 +1,16 @@
 # Salted LLM Benchmark Suite & Pareto Telemetry
 
-Zero-dependency, anti-contamination benchmark suite and static Pareto dashboard for comparing local quantization, speculative decoding (MTP / DSpark), reasoning effort tiers, and hardware memory topologies.
+[![Live Pareto Dashboard](https://img.shields.io/badge/Live_Dashboard-GitHub_Pages-38bdf8?style=for-the-badge)](https://chrismarentette.github.io/salted-bench/)
 
-## Published Dashboard
-- **`index.html`** / **`salted-pareto-dashboard.html`** — self-contained zero-CDN HTML visualization (built with `--anonymize`, no raw local IPs, paths, or private run JSONs).
+**[Launch Interactive Pareto Dashboard ->](https://chrismarentette.github.io/salted-bench/)**
+
+[![Salted Benchmark Pareto Frontier Dashboard](assets/dashboard-preview.png)](https://chrismarentette.github.io/salted-bench/)
+
+*Click the preview above to open the live zero-CDN interactive dashboard (`Pass@1` vs. median wall time, suite/system/model-family filters, Category & Task Matrix tabs, power/wattage telemetry, and CSV/PNG export).*
+
+---
+
+Zero-dependency, anti-contamination benchmark suite and static Pareto dashboard for comparing local quantization, speculative decoding (MTP / DSpark), reasoning effort tiers, and hardware memory topologies.
 
 ## Suites
 - **`salted-eval.py`** (`v1` 16 tasks / `v2` 24 tasks / `v3` 28 tasks): PRNG-salted coding, symbolic reasoning, strict JSON/schema, long-context, agent tool-use, ops/voice, and frontier ceiling tasks with deterministic graders, in-flight `perf_floor` checks, `llama_version` stamping, and `run_validity` quarantine.
