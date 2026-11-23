@@ -284,13 +284,17 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       margin-bottom: 16px; overflow: hidden;
     }
     .filter-suite-bar {
-      padding: 10px 14px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+      padding: 9px 14px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
       gap: 10px; border-bottom: 1px solid var(--border-subtle); background: rgba(15, 23, 42, 0.72);
     }
     .suite-explain { font-size: 11.5px; color: var(--text-secondary); }
+    .filter-rig-bar {
+      padding: 8px 14px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+      gap: 10px; border-bottom: 1px solid var(--border-subtle); background: rgba(15, 23, 42, 0.52);
+    }
     .filter-top-bar {
-      padding: 10px 14px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
-      gap: 10px; background: rgba(15, 23, 42, 0.42);
+      padding: 8px 14px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+      gap: 10px; background: rgba(15, 23, 42, 0.36);
     }
     .filter-row { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
     .pills-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); margin-right: 4px; }
@@ -381,12 +385,20 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     .svg-point { cursor: pointer; transition: opacity 0.14s ease, filter 0.14s ease; }
     .svg-point.dimmed { opacity: 0.62; }
     .svg-point.active, .svg-point:hover { opacity: 1 !important; filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.5)); }
-    .chart-footer { padding: 12px 18px 14px; border-top: 1px solid var(--border-subtle); display: flex; flex-direction: column; gap: 10px; }
-    .legend-row { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; font-size: 11.5px; color: var(--text-secondary); }
-    .legend-item { display: inline-flex; align-items: center; gap: 6px; }
-    .legend-swatch { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
-    .legend-diamond { width: 8px; height: 8px; transform: rotate(45deg); display: inline-block; border-radius: 1px; }
-    .legend-dash { width: 18px; height: 0; border-top: 2px dashed var(--cyan); display: inline-block; }
+    .chart-footer { padding: 11px 18px 14px; border-top: 1px solid var(--border-subtle); display: flex; flex-direction: column; gap: 10px; }
+    .legend-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text-secondary); }
+    .legend-item {
+      display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: 999px;
+      border: 1px solid rgba(51, 65, 85, 0.55); background: rgba(15, 23, 42, 0.65);
+      color: var(--text-secondary); font-size: 11.5px; font-family: var(--font-sans);
+    }
+    .legend-btn { cursor: pointer; transition: all 0.14s ease; }
+    .legend-btn:hover, .legend-btn:focus-visible { border-color: var(--cyan); color: var(--text-primary); background: rgba(30, 41, 59, 0.9); outline: none; }
+    .legend-btn.pinned { border-color: rgba(56, 189, 248, 0.65); color: var(--text-primary); }
+    .legend-rig { font-size: 10px; color: var(--text-muted); font-family: var(--font-mono); }
+    .legend-swatch { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+    .legend-diamond { width: 7px; height: 7px; transform: rotate(45deg); display: inline-block; border-radius: 1px; flex-shrink: 0; }
+    .legend-dash { width: 18px; height: 2px; background: linear-gradient(90deg, var(--cyan), #60a5fa); border-radius: 2px; display: inline-block; }
 
     .table-wrap {
       overflow: auto; max-height: clamp(280px, 54vh, 540px);
@@ -518,13 +530,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         <div class="filter-row" id="suite-filters"></div>
         <div class="suite-explain" id="suite-explain"></div>
       </div>
-      <div class="filter-top-bar">
+      <div class="filter-rig-bar">
         <div class="filter-row" id="system-filters"></div>
-        <div class="filter-row" id="model-quick-filters"></div>
         <button class="drawer-toggle" id="drawer-toggle-btn" type="button" aria-expanded="false">
           <span id="drawer-summary-text">Runs</span>
-          <span class="drawer-hint" id="drawer-hint-text">Click to expand ▾</span>
+          <span class="drawer-hint" id="drawer-hint-text">Toggle ▾</span>
         </button>
+      </div>
+      <div class="filter-top-bar">
+        <div class="filter-row" id="model-quick-filters"></div>
       </div>
       <div class="runs-drawer collapsed" id="runs-drawer"></div>
     </section>
@@ -765,6 +779,60 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       // esc() neutralizes untrusted fields before DOM template insertion
       function esc(s) {
         return String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+      }
+
+      function shortRigTag(h) {
+        if (!h) return '';
+        if (h.includes('Rig A')) return 'A';
+        if (h.includes('Rig B')) return 'B';
+        return h.slice(0, 6);
+      }
+
+      function shortModelBase(name) {
+        const s = String(name || '');
+        const l = s.toLowerCase();
+        if (l.includes('flash-next')) return 'QFN';
+        if (l.includes('inkling')) return 'Inkling';
+        if (l.includes('3.8-27b')) return 'Qw3.8-27B';
+        if (l.includes('3.6-35b') || l.includes('3.6-35b')) return 'Qw3.6-35B';
+        if (l.includes('3.5-122b')) return 'Qw3.5-122B';
+        if (l.includes('gemma-4-26b')) return 'Gemma4-26B';
+        if (l.includes('gemma-4-12b')) return 'Gemma4-12B';
+        if (l.includes('gemma-4-e4b')) return 'Gemma4-E4B';
+        if (l.includes('gemma-4-e2b')) return 'Gemma4-E2B';
+        if (l.includes('qwen3-4b')) return 'Qw3-4B';
+        if (l.includes('lfm2.5')) return 'LFM2.5';
+        if (l.includes('lfm3')) return 'LFM3-2B';
+        if (l.includes('phi-4')) return 'Phi4-Mini';
+        return s.length > 16 ? s.slice(0, 15) + '…' : s;
+      }
+
+      function shortQuantTag(q) {
+        const s = String(q || '').toUpperCase();
+        if (!s) return '';
+        if (s.includes('IQ3')) return 'IQ3';
+        if (s.includes('Q4_K')) return 'Q4';
+        if (s.includes('Q5_K')) return 'Q5';
+        if (s.includes('Q6_K')) return 'Q6';
+        if (s.includes('Q2_0')) return 'Q2';
+        if (s.includes('Q4_0')) return 'QAT';
+        if (s.includes('BF16')) return 'BF16';
+        if (s.startsWith('IT')) return 'IT';
+        return s.split(/[_ +]/)[0].slice(0, 6);
+      }
+
+      function shortEffortTag(eff) {
+        if (!eff || eff === 'default' || eff === 'think') return '';
+        if (eff === 'medium') return 'med';
+        return eff;
+      }
+
+      function shortRunName(r) {
+        const base = shortModelBase(r.model);
+        const q = shortQuantTag(r.quant);
+        const e = shortEffortTag(r.effort);
+        const sub = r._sliceTag === 'subset' ? 'sub' : '';
+        return [base, q, e, sub].filter(Boolean).join(' ');
       }
 
       function runDisplayName(r) {
@@ -1024,9 +1092,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       function renderBaseGrid(dom, xLabel, xUnit, badge, lowerIsBetter) {
         svgEl.innerHTML = '';
         const defs = el('defs');
-        const hatch = el('pattern', { id: 'dom-hatch', width: 10, height: 10, patternUnits: 'userSpaceOnUse', patternTransform: 'rotate(45)' });
-        hatch.appendChild(el('line', { x1: 0, y1: 0, x2: 0, y2: 10, stroke: '#334155', 'stroke-width': 1.2, 'stroke-opacity': 0.28 }));
-        defs.appendChild(hatch);
+        const fGrad = el('linearGradient', { id: 'frontier-area-grad', x1: 0, y1: 0, x2: 0, y2: 1 });
+        fGrad.appendChild(el('stop', { offset: '0%', 'stop-color': '#38bdf8', 'stop-opacity': '0.16' }));
+        fGrad.appendChild(el('stop', { offset: '100%', 'stop-color': '#38bdf8', 'stop-opacity': '0.0' }));
+        defs.appendChild(fGrad);
         const clip = el('clipPath', { id: 'plot-clip' });
         clip.appendChild(el('rect', { x: PAD.left, y: PAD.top, width: PLOT_W, height: PLOT_H }));
         defs.appendChild(clip);
@@ -1068,33 +1137,47 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         return plotLayer;
       }
 
+      function monotoneCurveD(pts) {
+        if (!pts.length) return '';
+        if (pts.length === 1) return `M ${pts[0].x} ${pts[0].y}`;
+        if (pts.length === 2) return `M ${pts[0].x} ${pts[0].y} L ${pts[1].x} ${pts[1].y}`;
+        const n = pts.length;
+        const dx = [], m = [];
+        for (let i = 0; i < n - 1; i++) {
+          const dxi = Math.max(0.5, pts[i + 1].x - pts[i].x);
+          dx.push(dxi);
+          m.push((pts[i + 1].y - pts[i].y) / dxi);
+        }
+        const tang = new Array(n).fill(0);
+        tang[0] = m[0];
+        tang[n - 1] = m[n - 2];
+        for (let i = 1; i < n - 1; i++) {
+          if (m[i - 1] * m[i] <= 0) {
+            tang[i] = 0;
+          } else {
+            const w1 = 2 * dx[i] + dx[i - 1], w2 = dx[i] + 2 * dx[i - 1];
+            tang[i] = (w1 + w2) / (w1 / m[i - 1] + w2 / m[i]);
+          }
+        }
+        const parts = [`M ${pts[0].x.toFixed(2)} ${pts[0].y.toFixed(2)}`];
+        for (let i = 0; i < n - 1; i++) {
+          const h = dx[i] / 3;
+          const c1x = pts[i].x + h, c1y = pts[i].y + tang[i] * h;
+          const c2x = pts[i + 1].x - h, c2y = pts[i + 1].y - tang[i + 1] * h;
+          parts.push(`C ${c1x.toFixed(2)} ${c1y.toFixed(2)}, ${c2x.toFixed(2)} ${c2y.toFixed(2)}, ${pts[i + 1].x.toFixed(2)} ${pts[i + 1].y.toFixed(2)}`);
+        }
+        return parts.join(' ');
+      }
+
       function renderFrontierPath(layer, front, xKey, yKey, dom, lowerIsBetter) {
         if (!front.length) return;
-        const R = PAD.left + PLOT_W + 400, L = PAD.left - 400, B = PAD.top + PLOT_H + 400;
-        const pts = front.map(p => ({ x: sx(p[xKey], dom), y: sy(p[yKey], dom) }));
-        let d = [];
-        if (lowerIsBetter) {
-          d = [`M ${pts[0].x} ${B}`, `L ${pts[0].x} ${pts[0].y}`];
-          for (let i = 1; i < pts.length; i++) { d.push(`L ${pts[i].x} ${pts[i - 1].y}`); d.push(`L ${pts[i].x} ${pts[i].y}`); }
-          d.push(`L ${R} ${pts[pts.length - 1].y}`);
-          const poly = d.join(' ') + ` L ${R} ${B} Z`;
-          layer.appendChild(el('path', { d: poly, fill: 'rgba(15,23,42,0.42)' }));
-          layer.appendChild(el('path', { d: poly, fill: 'url(#dom-hatch)' }));
-        } else {
-          d = [`M ${L} ${pts[0].y}`, `L ${pts[0].x} ${pts[0].y}`];
-          for (let i = 1; i < pts.length; i++) { d.push(`L ${pts[i - 1].x} ${pts[i].y}`); d.push(`L ${pts[i].x} ${pts[i].y}`); }
-          d.push(`L ${pts[pts.length - 1].x} ${B}`);
-          const poly = d.join(' ') + ` L ${L} ${B} Z`;
-          layer.appendChild(el('path', { d: poly, fill: 'rgba(15,23,42,0.42)' }));
-          layer.appendChild(el('path', { d: poly, fill: 'url(#dom-hatch)' }));
-        }
-        layer.appendChild(el('path', { d: d.join(' '), fill: 'none', stroke: '#38bdf8', 'stroke-width': 1.8, 'stroke-dasharray': '6 5', 'stroke-opacity': 0.8 }));
-        if (!isZoomed()) {
-          layer.appendChild(el('text', {
-            x: lowerIsBetter ? PAD.left + PLOT_W - 14 : PAD.left + 14, y: PAD.top + PLOT_H - 14, fill: '#475569', 'font-size': 11,
-            'font-weight': 700, 'letter-spacing': '0.08em', 'text-anchor': lowerIsBetter ? 'end' : 'start'
-          }, 'DOMINATED ZONE'));
-        }
+        const pts = front.map(p => ({ x: sx(p[xKey], dom), y: sy(p[yKey], dom) })).sort((a, b) => a.x - b.x);
+        if (pts.length === 1) return;
+        const curveD = monotoneCurveD(pts);
+        const plotBottom = PAD.top + PLOT_H;
+        const areaD = `${curveD} L ${pts[pts.length - 1].x.toFixed(2)} ${plotBottom} L ${pts[0].x.toFixed(2)} ${plotBottom} Z`;
+        layer.appendChild(el('path', { d: areaD, fill: 'url(#frontier-area-grad)' }));
+        layer.appendChild(el('path', { d: curveD, fill: 'none', stroke: '#38bdf8', 'stroke-width': 2.4, 'stroke-linecap': 'round', 'stroke-opacity': 0.88 }));
       }
 
       function drawMarker(layer, cx, cy, color, shape, isFront, isHighlighted, payload, kind, ptId, labelGroup) {
@@ -1133,6 +1216,52 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           renderAll();
         });
         layer.appendChild(g);
+        return g;
+      }
+
+      function renderInteractiveLegend(items, kind) {
+        const leg = document.getElementById('chart-legend');
+        leg.innerHTML = '';
+        items.forEach(it => {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'legend-item legend-btn' + (state.pinnedIds.has(it.id) ? ' pinned' : '');
+          b.setAttribute('aria-label', runDisplayName(it.run));
+          const sw = it.shape === 'diamond'
+            ? `<span class="legend-diamond" style="background:${it.color}"></span>`
+            : `<span class="legend-swatch" style="background:${it.color}"></span>`;
+          const rig = shortRigTag(it.run.host_label);
+          const rigSpan = rig ? `<span class="legend-rig">(${esc(rig)})</span>` : '';
+          b.innerHTML = `${sw}<span>${esc(shortRunName(it.run))}</span>${rigSpan}`;
+          const enter = e => {
+            if (it.marker) { it.marker.classList.remove('dimmed'); it.marker.classList.add('active'); }
+            if (it.labelGroup) it.labelGroup.style.display = 'inline';
+            showTooltip(e, it.payload, kind);
+          };
+          const leave = () => {
+            if (it.marker && !it.isFront && !state.pinnedIds.has(it.id)) {
+              it.marker.classList.add('dimmed');
+              it.marker.classList.remove('active');
+            }
+            if (it.labelGroup && it.labelGroup.dataset.keep !== '1') it.labelGroup.style.display = 'none';
+            hideTooltip();
+          };
+          b.addEventListener('mouseenter', enter);
+          b.addEventListener('mousemove', moveTooltip);
+          b.addEventListener('mouseleave', leave);
+          b.addEventListener('focus', enter);
+          b.addEventListener('blur', leave);
+          b.addEventListener('click', () => {
+            if (state.pinnedIds.has(it.id)) state.pinnedIds.delete(it.id);
+            else state.pinnedIds.add(it.id);
+            renderAll();
+          });
+          leg.appendChild(b);
+        });
+        const curveItem = document.createElement('span');
+        curveItem.className = 'legend-item';
+        curveItem.innerHTML = '<span class="legend-dash"></span><span>Pareto Curve</span>';
+        leg.appendChild(curveItem);
       }
 
       function renderFiltersAndKpis() {
@@ -1417,17 +1546,19 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           lg.appendChild(el('text', { class: 'lbl-halo', x: box.lx, y: box.ly, fill: '#f1f5f9', 'font-size': 11.5, 'font-weight': 700, 'text-anchor': box.anchor }, title));
           lg.appendChild(el('text', { class: 'lbl-halo', x: box.lx, y: box.ly + 14, fill: p.color, 'font-size': 10.5, 'font-weight': 600, 'font-family': 'ui-monospace, monospace', 'text-anchor': box.anchor }, sub));
           labelGroups.push(lg);
-          drawMarker(layer, cx, cy, p.color, p.shape, isFront, isPinned, { ...p.run, _isFront: isFront }, 'overall', p.id, lg);
-        });
-        labelGroups.forEach(lg => layer.appendChild(lg));
+        const markerRef = drawMarker(layer, cx, cy, p.color, p.shape, isFront, isPinned, { ...p.run, _isFront: isFront }, 'overall', p.id, lg);
+        p._marker = markerRef;
+        p._labelGroup = lg;
+      });
+      labelGroups.forEach(lg => layer.appendChild(lg));
 
-        document.getElementById('chart-legend').innerHTML = pts.map(p => {
-          const sw = p.shape === 'diamond' ? `<span class="legend-diamond" style="background:${p.color}"></span>` : `<span class="legend-swatch" style="background:${p.color}"></span>`;
-          return `<span class="legend-item">${sw}${esc(runDisplayName(p.run))} (${esc(p.run.host_label)})</span>`;
-        }).join('') + '<span class="legend-item"><span class="legend-dash"></span>Pareto Frontier</span>';
+      renderInteractiveLegend(pts.map(p => ({
+        run: p.run, id: p.id, color: p.color, shape: p.shape, isFront: frontIds.has(p.id),
+        marker: p._marker, labelGroup: p._labelGroup, payload: { ...p.run, _isFront: frontIds.has(p.id) },
+      })), 'overall');
 
-        renderScoreboard(allPlotted, frontIds);
-      }
+      renderScoreboard(allPlotted, frontIds);
+    }
 
       function renderCategory() {
         const runs = visibleRuns();
@@ -1507,9 +1638,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         });
         labelGroups.forEach(lg => layer.appendChild(lg));
 
-        document.getElementById('chart-legend').innerHTML = runs.map(r =>
-          `<span class="legend-item"><span class="legend-swatch" style="background:${r.color}"></span>${esc(runDisplayName(r))}</span>`
-        ).join('') + '<span class="legend-item"><span class="legend-dash"></span>Pareto Frontier</span>';
+        renderInteractiveLegend(runs.map(r => ({
+          run: r, id: r.run_id, color: r.color, shape: r.shape || 'circle', isFront: false,
+          marker: null, labelGroup: null, payload: { ...r, _isFront: false },
+        })), 'overall');
 
         renderScoreboard(runs, new Set());
       }
@@ -1682,9 +1814,19 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
       function moveTooltip(e) {
         const pad = 16, r = tooltipEl.getBoundingClientRect();
-        let l = e.clientX + pad, t = e.clientY + pad;
-        if (l + r.width > window.innerWidth - 10) l = e.clientX - r.width - pad;
-        if (t + r.height > window.innerHeight - 10) t = e.clientY - r.height - pad;
+        let cx = e && typeof e.clientX === 'number' && e.clientX > 0 ? e.clientX : 0;
+        let cy = e && typeof e.clientY === 'number' && e.clientY > 0 ? e.clientY : 0;
+        if (!cx && !cy && e && e.currentTarget && e.currentTarget.getBoundingClientRect) {
+          const br = e.currentTarget.getBoundingClientRect();
+          cx = br.left + br.width / 2;
+          cy = Math.max(12, br.top - r.height - 12);
+          tooltipEl.style.left = `${Math.max(8, Math.min(window.innerWidth - r.width - 10, cx - r.width / 2))}px`;
+          tooltipEl.style.top = `${Math.max(8, cy)}px`;
+          return;
+        }
+        let l = cx + pad, t = cy + pad;
+        if (l + r.width > window.innerWidth - 10) l = cx - r.width - pad;
+        if (t + r.height > window.innerHeight - 10) t = cy - r.height - pad;
         tooltipEl.style.left = `${Math.max(8, l)}px`;
         tooltipEl.style.top = `${Math.max(8, t)}px`;
       }
