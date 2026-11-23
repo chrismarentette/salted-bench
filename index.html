@@ -942,11 +942,9 @@
         return plotLayer;
       }
 
-      function monotoneCurveD(pts) {
-        if (!pts.length) return '';
-        if (pts.length === 1) return `M ${pts[0].x} ${pts[0].y}`;
-        if (pts.length === 2) return `M ${pts[0].x} ${pts[0].y} L ${pts[1].x} ${pts[1].y}`;
+      function monotoneSegments(pts) {
         const n = pts.length;
+        if (n < 2) return [];
         const dx = [], m = [];
         for (let i = 0; i < n - 1; i++) {
           const dxi = Math.max(0.5, pts[i + 1].x - pts[i].x);
@@ -964,25 +962,60 @@
             tang[i] = (w1 + w2) / (w1 / m[i - 1] + w2 / m[i]);
           }
         }
-        const parts = [`M ${pts[0].x.toFixed(2)} ${pts[0].y.toFixed(2)}`];
+        const segs = [];
         for (let i = 0; i < n - 1; i++) {
           const h = dx[i] / 3;
           const c1x = pts[i].x + h, c1y = pts[i].y + tang[i] * h;
           const c2x = pts[i + 1].x - h, c2y = pts[i + 1].y - tang[i + 1] * h;
-          parts.push(`C ${c1x.toFixed(2)} ${c1y.toFixed(2)}, ${c2x.toFixed(2)} ${c2y.toFixed(2)}, ${pts[i + 1].x.toFixed(2)} ${pts[i + 1].y.toFixed(2)}`);
+          segs.push({
+            x0: pts[i].x, y0: pts[i].y,
+            cmd: `C ${c1x.toFixed(2)} ${c1y.toFixed(2)}, ${c2x.toFixed(2)} ${c2y.toFixed(2)}, ${pts[i + 1].x.toFixed(2)} ${pts[i + 1].y.toFixed(2)}`,
+          });
         }
-        return parts.join(' ');
+        return segs;
       }
 
       function renderFrontierPath(layer, front, xKey, yKey, dom, lowerIsBetter) {
         if (!front.length) return;
         const pts = front.map(p => ({ x: sx(p[xKey], dom), y: sy(p[yKey], dom) })).sort((a, b) => a.x - b.x);
-        if (pts.length === 1) return;
-        const curveD = monotoneCurveD(pts);
-        const plotBottom = PAD.top + PLOT_H;
-        const areaD = `${curveD} L ${pts[pts.length - 1].x.toFixed(2)} ${plotBottom} L ${pts[0].x.toFixed(2)} ${plotBottom} Z`;
+        const y0Px = sy(0, dom), y100Px = sy(100, dom);
+        const leftEdge = PAD.left, rightEdge = PAD.left + PLOT_W, plotBottom = PAD.top + PLOT_H;
+        const leftAnchor = lowerIsBetter
+          ? { x: Math.min(pts[0].x - 0.5, Math.max(leftEdge, sx(0, dom))), y: y0Px }
+          : { x: Math.min(pts[0].x - 0.5, leftEdge), y: y100Px };
+        const rightAnchor = lowerIsBetter
+          ? { x: Math.max(pts[pts.length - 1].x + 0.5, rightEdge), y: y100Px }
+          : { x: Math.max(pts[pts.length - 1].x + 0.5, rightEdge), y: y0Px };
+
+        const extPts = [];
+        if (pts[0].x > leftAnchor.x + 1 || Math.abs(pts[0].y - leftAnchor.y) > 1) extPts.push(leftAnchor);
+        const coreStart = extPts.length;
+        pts.forEach(p => extPts.push(p));
+        const hasRight = (rightAnchor.x > pts[pts.length - 1].x + 1 || Math.abs(rightAnchor.y - pts[pts.length - 1].y) > 1);
+        if (hasRight) extPts.push(rightAnchor);
+
+        const segs = monotoneSegments(extPts);
+        if (!segs.length) return;
+        const fullD = `M ${extPts[0].x.toFixed(2)} ${extPts[0].y.toFixed(2)} ` + segs.map(s => s.cmd).join(' ');
+        const areaD = `${fullD} L ${extPts[extPts.length - 1].x.toFixed(2)} ${plotBottom} L ${extPts[0].x.toFixed(2)} ${plotBottom} Z`;
         layer.appendChild(el('path', { d: areaD, fill: 'url(#frontier-area-grad)' }));
-        layer.appendChild(el('path', { d: curveD, fill: 'none', stroke: '#38bdf8', 'stroke-width': 2.4, 'stroke-linecap': 'round', 'stroke-opacity': 0.88 }));
+
+        // Projected tails (dashed, softer) + measured core frontier (solid) sharing identical C1 spline tangents
+        const coreEndSeg = coreStart + Math.max(0, pts.length - 1);
+        if (coreStart > 0) {
+          const dLeft = `M ${segs[0].x0.toFixed(2)} ${segs[0].y0.toFixed(2)} ${segs[0].cmd}`;
+          layer.appendChild(el('path', { d: dLeft, fill: 'none', stroke: '#38bdf8', 'stroke-width': 2.0, 'stroke-dasharray': '5 5', 'stroke-linecap': 'round', 'stroke-opacity': 0.58 }));
+        }
+        if (pts.length >= 2) {
+          const coreSegs = segs.slice(coreStart, coreEndSeg);
+          const dCore = `M ${coreSegs[0].x0.toFixed(2)} ${coreSegs[0].y0.toFixed(2)} ` + coreSegs.map(s => s.cmd).join(' ');
+          layer.appendChild(el('path', { d: dCore, fill: 'none', stroke: '#38bdf8', 'stroke-width': 2.5, 'stroke-linecap': 'round', 'stroke-opacity': 0.92 }));
+        }
+        if (hasRight) {
+          const rSeg = segs[segs.length - 1];
+          const dRight = `M ${rSeg.x0.toFixed(2)} ${rSeg.y0.toFixed(2)} ${rSeg.cmd}`;
+          layer.appendChild(el('path', { d: dRight, fill: 'none', stroke: '#38bdf8', 'stroke-width': 2.0, 'stroke-dasharray': '5 5', 'stroke-linecap': 'round', 'stroke-opacity': 0.58 }));
+        }
       }
 
       function drawMarker(layer, cx, cy, color, shape, isFront, isHighlighted, payload, kind, ptId, labelGroup) {
