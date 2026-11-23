@@ -1,0 +1,23 @@
+# Raw per-run benchmark dumps, partial checkpoints & logs stay local
+runs/
+runs_v4/
+*.partial.json
+*.log
+*.bak
+*.tmp
+.redact.local
+
+# Python & Node artifacts
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Secrets, credentials & local env overrides
+.env
+.env.*
+*secret*
+*token*
+*.pem
+*.key
+.DS_Store
