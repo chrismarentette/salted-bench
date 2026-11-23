@@ -688,12 +688,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       };
 
       const AXIS_CONFIG = {
-        wall_median_s:  { key: 'wall_median_s',  label: 'Median Wall Time / Task (seconds)', shortLabel: 'Median Wall (s)', unit: 's',    lowerIsBetter: true,  badge: '↖ Better (Faster & More Accurate)' },
-        wall_mean_s:    { key: 'wall_mean_s',    label: 'Mean (Average) Wall Time / Task (seconds)', shortLabel: 'Mean Wall (s)', unit: 's', lowerIsBetter: true, badge: '↖ Better (Faster Average & More Accurate)' },
-        wall_total_min: { key: 'wall_total_min', label: 'Total Suite Wall Time (minutes)',   shortLabel: 'Suite Time (min)', unit: 'm',   lowerIsBetter: true,  badge: '↖ Better (Shorter Suite & More Accurate)' },
-        gen_tok_median: { key: 'gen_tok_median', label: 'Median Output Tokens / Task',       shortLabel: 'Median Tokens',    unit: ' tok',lowerIsBetter: true,  badge: '↖ Better (Concise & Accurate)' },
-        pp_tps_median:  { key: 'pp_tps_median',  label: 'Median Prefill Speed (tokens/s)',   shortLabel: 'Prefill (pp t/s)', unit: ' t/s', lowerIsBetter: false, badge: '↗ Better (Faster Prefill & Accurate)' },
-        tg_tps_median:  { key: 'tg_tps_median',  label: 'Median Decode Speed (tokens/s)',    shortLabel: 'Decode (tg t/s)',  unit: ' t/s', lowerIsBetter: false, badge: '↗ Better (Faster Decode & Accurate)' },
+        wall_median_s:  { key: 'wall_median_s',  label: 'Median Wall Time / Task (seconds)', shortLabel: 'Median Wall (s)', unit: 's',    lowerIsBetter: true,  better: '↖ Better · Faster & Higher',        worse: 'Slower & Lower · Worse ↘' },
+        wall_mean_s:    { key: 'wall_mean_s',    label: 'Mean (Average) Wall Time / Task (seconds)', shortLabel: 'Mean Wall (s)', unit: 's', lowerIsBetter: true, better: '↖ Better · Faster Avg & Higher', worse: 'Slower Avg & Lower · Worse ↘' },
+        wall_total_min: { key: 'wall_total_min', label: 'Total Suite Wall Time (minutes)',   shortLabel: 'Suite Time (min)', unit: 'm',   lowerIsBetter: true,  better: '↖ Better · Shorter & Higher',       worse: 'Longer & Lower · Worse ↘' },
+        gen_tok_median: { key: 'gen_tok_median', label: 'Median Output Tokens / Task',       shortLabel: 'Median Tokens',    unit: ' tok',lowerIsBetter: true,  better: '↖ Better · Concise & Higher',       worse: 'Verbose & Lower · Worse ↘' },
+        pp_tps_median:  { key: 'pp_tps_median',  label: 'Median Prefill Speed (tokens/s)',   shortLabel: 'Prefill (pp t/s)', unit: ' t/s', lowerIsBetter: false, better: 'Faster Prefill & Higher · Better ↗', worse: '↙ Worse · Slower Prefill & Lower' },
+        tg_tps_median:  { key: 'tg_tps_median',  label: 'Median Decode Speed (tokens/s)',    shortLabel: 'Decode (tg t/s)',  unit: ' t/s', lowerIsBetter: false, better: 'Faster Decode & Higher · Better ↗',  worse: '↙ Worse · Slower Decode & Lower' },
       };
 
       function meanWall(s) {
@@ -766,7 +766,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       const tooltipEl = document.getElementById('tooltip');
       const toastEl = document.getElementById('toast');
 
-      const W = 880, H = 500, PAD = { top: 48, right: 48, bottom: 64, left: 68 };
+      const W = 880, H = 500, PAD = { top: 20, right: 48, bottom: 56, left: 68 };
       const PLOT_W = W - PAD.left - PAD.right, PLOT_H = H - PAD.top - PAD.bottom, Y_MAX = 114;
 
       function el(tag, attrs = {}, text = null) {
@@ -1089,7 +1089,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       const sx = (v, dom) => PAD.left + ((v - dom.xMin) / Math.max(1e-9, dom.xMax - dom.xMin)) * PLOT_W;
       const sy = (p, dom) => PAD.top + PLOT_H - ((p - dom.yMin) / Math.max(1e-9, dom.yMax - dom.yMin)) * PLOT_H;
 
-      function renderBaseGrid(dom, xLabel, xUnit, badge, lowerIsBetter) {
+      function renderBaseGrid(dom, xLabel, xUnit, hints, lowerIsBetter) {
         svgEl.innerHTML = '';
         const defs = el('defs');
         const fGrad = el('linearGradient', { id: 'frontier-area-grad', x1: 0, y1: 0, x2: 0, y2: 1 });
@@ -1124,12 +1124,27 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           svgEl.appendChild(el('text', { x, y: PAD.top + PLOT_H + 20, fill: '#64748b', 'font-size': 11.5, 'font-family': 'ui-monospace, monospace', 'text-anchor': 'middle' }, `${fmt}${xUnit === ' tok' ? '' : xUnit}`));
         });
 
-        svgEl.appendChild(el('text', { x: PAD.left + PLOT_W / 2, y: H - 14, fill: '#94a3b8', 'font-size': 12.5, 'font-weight': 600, 'text-anchor': 'middle' }, xLabel));
+        svgEl.appendChild(el('text', { x: PAD.left + PLOT_W / 2, y: H - 12, fill: '#94a3b8', 'font-size': 12.5, 'font-weight': 600, 'text-anchor': 'middle' }, xLabel));
         svgEl.appendChild(el('text', { x: 20, y: PAD.top + PLOT_H / 2, fill: '#94a3b8', 'font-size': 12.5, 'font-weight': 600, 'text-anchor': 'middle', transform: `rotate(-90, 20, ${PAD.top + PLOT_H / 2})` }, 'Pass@1 Accuracy (%)'));
 
-        const bw = Math.max(220, badge.length * 7.2 + 24), bx = PAD.left + 12;
-        svgEl.appendChild(el('rect', { x: bx, y: 12, width: bw, height: 24, rx: 12, fill: 'rgba(56,189,248,0.12)', stroke: 'rgba(56,189,248,0.45)' }));
-        svgEl.appendChild(el('text', { x: bx + bw / 2, y: 27.5, fill: '#38bdf8', 'font-size': 11.5, 'font-weight': 700, 'text-anchor': 'middle' }, badge));
+        const betterText = (hints && hints.better) || (lowerIsBetter ? '↖ Better' : 'Better ↗');
+        const worseText = (hints && hints.worse) || (lowerIsBetter ? 'Worse ↘' : '↙ Worse');
+        svgEl.appendChild(el('text', {
+          x: lowerIsBetter ? PAD.left + 12 : PAD.left + PLOT_W - 12,
+          y: PAD.top + 18,
+          fill: 'rgba(56, 189, 248, 0.62)',
+          'font-size': 11, 'font-weight': 600, 'letter-spacing': '0.03em',
+          'text-anchor': lowerIsBetter ? 'start' : 'end',
+          'pointer-events': 'none',
+        }, betterText));
+        svgEl.appendChild(el('text', {
+          x: lowerIsBetter ? PAD.left + PLOT_W - 12 : PAD.left + 12,
+          y: PAD.top + PLOT_H - 12,
+          fill: 'rgba(100, 116, 139, 0.52)',
+          'font-size': 10.5, 'font-weight': 600, 'letter-spacing': '0.03em',
+          'text-anchor': lowerIsBetter ? 'end' : 'start',
+          'pointer-events': 'none',
+        }, worseText));
 
         const plotLayer = el('g', { id: 'plot-layer', 'clip-path': 'url(#plot-clip)' });
         svgEl.appendChild(plotLayer);
@@ -1528,7 +1543,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         const maxVal = pts.length ? Math.max(...pts.map(p => p.xVal)) : 100;
         const { max: baseXMax } = getNiceScale(maxVal * 1.15);
         const dom = curDomain(baseXMax);
-        const layer = renderBaseGrid(dom, cfg.label, cfg.unit, cfg.badge, cfg.lowerIsBetter);
+        const layer = renderBaseGrid(dom, cfg.label, cfg.unit, cfg, cfg.lowerIsBetter);
 
         if (!pts.length) {
           layer.appendChild(el('text', { x: PAD.left + PLOT_W / 2, y: PAD.top + PLOT_H / 2, fill: '#64748b', 'font-size': 13, 'text-anchor': 'middle' }, 'No runs match the current Suite, Rig & Model filters.'));
@@ -1629,7 +1644,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         const maxVal = pts.length ? Math.max(...pts.map(p => p.medianWall)) : 180;
         const { max: baseXMax } = getNiceScale(maxVal * 1.15);
         const dom = curDomain(baseXMax);
-        const layer = renderBaseGrid(dom, 'Category Median Wall Time (seconds)', 's', '↖ Better (Faster & More Accurate)', true);
+        const layer = renderBaseGrid(dom, 'Category Median Wall Time (seconds)', 's', { better: '↖ Better · Faster & Higher', worse: 'Slower & Lower · Worse ↘' }, true);
 
         if (!pts.length) {
           layer.appendChild(el('text', { x: PAD.left + PLOT_W / 2, y: PAD.top + PLOT_H / 2, fill: '#64748b', 'font-size': 13, 'text-anchor': 'middle' }, 'No category breakdown available for the current filter.'));
