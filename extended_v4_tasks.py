@@ -637,8 +637,19 @@ def main() -> None:
                 if not ok_t:
                     perf_warnings.append(f"{r['id']}: {'; '.join(warn_t)}")
     env_lim_cnt = sum(1 for r in results if r.get("finish_reason") == "env_limit")
-    if len(perf_warnings) >= 2:
-        val_status, val_reason = "invalidated", f"In-flight perf_floor violations ({len(perf_warnings)}): {perf_warnings[0]}"
+    med_tg = statistics.median([r["tg_tps"] for r in results if r.get("tg_tps") and r.get("predicted_n", 0) >= 64]) if any(r.get("tg_tps") and r.get("predicted_n", 0) >= 64 for r in results) else None
+    long_pps = [r["pp_tps"] for r in results if r.get("pp_tps") and (r.get("prompt_n") or 0) >= 1000]
+    med_pp_long = statistics.median(long_pps) if long_pps else None
+    med_ok, med_warn = (True, [])
+    if check_perf_floor is not None and floors:
+        med_ok, med_warn = check_perf_floor(
+            pp_tps=med_pp_long, tg_tps=med_tg,
+            gpu_util_pct=(pwr or {}).get("gpu_util_avg_pct"),
+            floors=floors, prompt_n=1000 if med_pp_long is not None else 999999, predicted_n=64,
+        )
+    if not med_ok or len(perf_warnings) >= max(3, len(results) // 2):
+        why = "; ".join(med_warn) if not med_ok else perf_warnings[0]
+        val_status, val_reason = "invalidated", f"Perf bottleneck ({len(perf_warnings)} warnings): {why}"
     elif env_lim_cnt > 0:
         val_status, val_reason = "env_limit_impacted", f"{env_lim_cnt} task(s) hit context/memory env_limit"
     else:
