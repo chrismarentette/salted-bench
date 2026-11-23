@@ -19,6 +19,7 @@
 | `v3-Rig B-ink2-udq4kxl-med-dspark` | Rig B | Inkling-2-Mini | UD-Q4_K_XL | medium | 15/16 (93.8%) | 23/28 (82.1%) | 4 | 36.73 | 92.33 | 112.41 | 1.217 | 883.6 | 426.9 | 33.5 | 0.058 | 133.47W / 95.851Wh |
 | `v3-Rig B-qw38-27b-udq5kxl-low-mtp-frontier` | Rig B | Qwen3.8-27B | UD-Q5_K_XL | low | — | 2/4 (50.0%) | 2 | 234.39 | 236.26 | 50.32 | 0.213 | 1936.5 | 368.4 | 29.2 | 0.063 | — |
 | `v3-Rig B-qw38-27b-udq5kxl-low-mtp` | Rig B | Qwen3.8-27B | UD-Q5_K_XL | low | 15/16 (93.8%) | 25/28 (89.3%) | 2 | 46.12 | 69.8 | 76.74 | 1.099 | 1289.5 | 305.9 | 30.5 | 0.156 | — |
+| `v3-Rig B-qw38-27b-udq5kxl-med-mtp` | Rig B | Qwen3.8-27B | UD-Q5_K_XL | medium | 15/16 (93.8%) | 26/28 (92.9%) | 1 | 53.01 | 76.59 | 77.68 | 1.014 | 1122.4 | 344.9 | 30.9 | 0.157 | 133.94W / 79.79Wh |
 | `v3-Rig B-qwen36-35b-q5km-frontier` | Rig B | Qwen3.6-35B-A3B | Q5_K_M | default | — | 0/4 (0.0%) | 4 | 148.37 | 156.72 | 17.37 | 0.111 | 388.3 | 1750.9 | 55.3 | 0.0 | — |
 | `v3-Rig B-qwen36-35b-q5km-nothink` | Rig B | Qwen3.6-35B-A3B | Q5_K_M | nothink | 9/16 (56.2%) | 19/28 (67.9%) | 1 | 3.72 | 17.03 | 32.69 | 1.919 | 271.8 | 1366.6 | 55.7 | 1.0 | — |
 | `v3-Rig B-qwflash-ud-iq3xxs-med-mtp` | Rig B | Qwen3.8-Flash-Next | UD-IQ3_XXS | medium | 15/16 (93.8%) | 26/28 (92.9%) | 1 | 18.56 | 38.09 | 41.4 | 1.087 | 754.7 | 505.4 | 54.9 | 0.151 | 133.92W / 39.68Wh |
@@ -29,6 +30,9 @@
 |---|---|---|---|---:|---:|---:|---:|---:|---|
 | `extv4-Rig B-ink2-udq4kxl-low-dspark` | Inkling-2-Mini | low | 6/6 (100.0%) | 14.12 | 19.4 | 686.8 | 32.9 | 0.081 | 133.51W / 4.425Wh |
 | `extv4-Rig B-ink2-udq4kxl-med-dspark` | Inkling-2-Mini | medium | 5/6 (83.3%) | 17.26 | 21.06 | 691.0 | 33.0 | 0.045 | 133.63W / 5.134Wh |
+| `extv4-Rig B-qw38-27b-udq5kxl-low-mtp` | Qwen3.8-27B | low | 5/6 (83.3%) | 11.41 | 28.31 | 912.4 | 32.5 | 0.059 | 133.47W / 5.998Wh |
+| `extv4-Rig B-qw38-27b-udq5kxl-med-mtp` | Qwen3.8-27B | medium | 5/6 (83.3%) | 13.72 | 27.58 | 661.9 | 32.6 | 0.052 | 133.81W / 6.37Wh |
+| `extv4-Rig B-qw38-27b-udq5kxl-xhigh-mtp` | Qwen3.8-27B | xhigh | 5/6 (83.3%) | 15.47 | 28.62 | 911.1 | 27.1 | 0.052 | 133.81W / 6.775Wh |
 | `extv4-Rig B-qwflash-ud-iq3xxs-low-mtp` | Qwen3.8-Flash-Next | low | 5/6 (83.3%) | 5.08 | 11.74 | 848.6 | 60.0 | 0.176 | 133.0W / 2.056Wh |
 | `extv4-Rig B-qwflash-ud-iq3xxs-med-mtp` | Qwen3.8-Flash-Next | medium | 5/6 (83.3%) | 5.22 | 2.76 | 657.5 | 54.8 | 0.248 | 133.79W / 1.307Wh |
 | `extv4-Rig B-qwflash-ud-q4kxl-low-mtp` | Qwen3.8-Flash-Next | low | 5/6 (83.3%) | 5.55 | 2.52 | 1095.4 | 51.5 | 0.267 | 121.98W / 1.215Wh |
